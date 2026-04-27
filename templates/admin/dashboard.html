@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Dashboard{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <h2>Administration Dashboard</h2>
+    <p>Total queries: {{ stats.total }}</p>
+    <p>Matched: {{ stats.matched }} &ndash; Fallbacks: {{ stats.fallback }}</p>
+    <h3>Per-intent breakdown</h3>
+    <ul>
+        {% for label, count in stats.per_intent.items() %}
+        <li>{{ label or 'Unmatched' }} &ndash; {{ count }}</li>
+        {% endfor %}
+    </ul>
+
+    <h3>Common keywords</h3>
+    {% if keyword_stats %}
+    <ul>
+        {% for word, count in keyword_stats %}
+        <li>{{ word }} &ndash; {{ count }}</li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p>No keywords collected yet.</p>
+    {% endif %}
+
+    <h3>System insights</h3>
+    <p>Failed responses: {{ insights.failed_responses }}</p>
+    <p>Most requested service: {% if insights.most_requested_services %}{{ insights.most_requested_services[0].service }}{% else %}None yet{% endif %}</p>
+
+    <h4>Top queries</h4>
+    {% if insights.top_queries %}
+    <ul>
+        {% for item in insights.top_queries %}
+        <li>{{ item.query }} &ndash; {{ item.count }}</li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p>No chat queries logged yet.</p>
+    {% endif %}
+
+    <h4>Service usage</h4>
+    {% if insights.most_requested_services %}
+    <ul>
+        {% for item in insights.most_requested_services %}
+        <li>{{ item.service }} &ndash; {{ item.count }}</li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p>No service usage recorded yet.</p>
+    {% endif %}
+
+    <h4>Signal flags</h4>
+    <p>Confused queries: {{ insights.signal_counts.confused_queries }}</p>
+    <p>Repeated queries: {{ insights.signal_counts.repeated_queries }}</p>
+
+    <a class="btn" href="{{ url_for('admin.view_logs') }}">View recent logs</a>
+    <a class="btn" href="{{ url_for('admin.view_intents') }}">Edit intent rules</a>
+    <a class="btn" href="{{ url_for('admin.view_task_requests') }}">View task requests</a>
+</section>
+{% endblock %}

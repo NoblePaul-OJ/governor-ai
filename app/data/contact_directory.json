@@ -1,0 +1,43 @@
+{
+  "vc": {
+    "email": "christiananieke2@gmail.com",
+    "office": "Not available yet",
+    "note": "You can send a message anytime. For physical visits, go through the VC's office/secretary."
+  },
+  "student_affairs": {
+    "phone": "08166915454",
+    "office": "Not available yet",
+    "note": "Handles student welfare, complaints, and general support."
+  },
+  "ict": {
+    "phone": "Not available yet",
+    "office": "Not available yet",
+    "note": "Handles portal issues, login problems, and technical support."
+  },
+  "hostels": {
+    "sacred_heart": {
+      "office": "Not available yet",
+      "phone": "Not available yet"
+    },
+    "ad_gentes": {
+      "office": "Not available yet",
+      "phone": "Not available yet"
+    },
+    "st_stephen": {
+      "office": "Not available yet",
+      "phone": "Not available yet"
+    },
+    "st_mary": {
+      "office": "Not available yet",
+      "phone": "Not available yet"
+    },
+    "nwabueze": {
+      "office": "Not available yet",
+      "phone": "Not available yet"
+    },
+    "our_saviour": {
+      "office": "Not available yet",
+      "phone": "Not available yet"
+    }
+  }
+}

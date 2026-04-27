@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+
+{% block title %}Task Requests{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <h2>Saved Task Requests</h2>
+    {% if not db_enabled %}
+    <p>Task request storage is currently disabled. Enable it with TASK_DB_ENABLED=1.</p>
+    {% elif requests %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Created At</th>
+                <th>Task</th>
+                <th>Output Type</th>
+                <th>Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in requests %}
+            <tr>
+                <td>{{ entry.id }}</td>
+                <td>{{ entry.created_at }}</td>
+                <td>{{ entry.task_label }} ({{ entry.task_key }})</td>
+                <td>{{ entry.output_type }}</td>
+                <td>
+                    <pre style="white-space:pre-wrap; margin:0;">{{ entry.payload | tojson(indent=2) }}</pre>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No saved task requests yet.</p>
+    {% endif %}
+</section>
+{% endblock %}

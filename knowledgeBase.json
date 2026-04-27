@@ -1,0 +1,421 @@
+﻿[
+    {
+        "intent":  "hostel_purpose",
+        "questions":  [
+                          "What is the purpose of hostel in GOU?",
+                          "Why do students stay in hostel?",
+                          "What is hostel accommodation for?",
+                          "Tell me about hostel accommodation",
+                          "Why are hostels provided"
+                      ],
+        "answer":  "At Godfrey Okoye University, hostels are provided to support students living away from home and to create a structured, safe, and disciplined environment that supports academic and personal development.",
+        "category":  "Accommodation"
+    },
+    {
+        "intent":  "hostel_eligibility",
+        "questions":  [
+                          "Who can stay in hostel?",
+                          "Is hostel compulsory?",
+                          "Am I eligible for hostel?",
+                          "Can all students stay in hostel?",
+                          "Who is allowed to live in hostel"
+                      ],
+        "answer":  "At Godfrey Okoye University, hostel accommodation is primarily for students. Students are expected to reside in the hostel unless officially permitted by the university to live off-campus.",
+        "category":  "Accommodation"
+    },
+    {
+        "intent":  "hostel_furnishing",
+        "questions":  [
+                          "What is provided in hostel rooms?",
+                          "What do hostel rooms contain?",
+                          "Do hostels have beds and electricity?",
+                          "What facilities are in GOU hostels?",
+                          "What will I find in my hostel room"
+                      ],
+        "answer":  "Hostel rooms at Godfrey Okoye University are typically furnished with basic items such as beds, mattresses, wardrobes, and access to electricity. Students are expected to maintain these facilities properly.",
+        "category":  "Accommodation"
+    },
+    {
+        "intent":  "hostel_allowed_items",
+        "questions":  [
+                          "What items can I bring to hostel?",
+                          "What is allowed in hostel?",
+                          "Can I bring my laptop and phone?",
+                          "What should I come with to hostel?",
+                          "List of things allowed in hostel"
+                      ],
+        "answer":  "Students in Godfrey Okoye University hostels are allowed to have personal and essential items such as bedding, clothes, study materials, personal electronics (like phones and laptops), and basic daily-use items.",
+        "category":  "Accommodation"
+    },
+    {
+        "intent":  "hostel_prohibited_items",
+        "questions":  [
+                          "What items are not allowed in hostel?",
+                          "Can I cook in hostel?",
+                          "Are cooking appliances allowed?",
+                          "Can I use heater or electric cooker?",
+                          "What is forbidden in hostel"
+                      ],
+        "answer":  "For safety reasons, Godfrey Okoye University prohibits the use of cooking appliances, heating devices, candles, and other hazardous items in hostels unless special permission is granted.",
+        "category":  "Accommodation"
+    },
+    {
+        "intent":  "hostel_exit_permission",
+        "questions":  [
+                          "Can I leave hostel anytime?",
+                          "Do I need permission to go out?",
+                          "What time can I leave hostel?",
+                          "Hostel exit rules",
+                          "Can I go out at night from hostel"
+                      ],
+        "answer":  "At Godfrey Okoye University, students are not allowed to leave the hostel between 6:00 PM and 6:00 AM without permission from the appropriate Student Affairs or hostel authorities.",
+        "category":  "Accommodation"
+    },
+    {
+        "intent":  "hostel_visitation_rules",
+        "questions":  [
+                          "Can I visit another hostel?",
+                          "Are male and female hostels separated?",
+                          "Can I visit opposite gender hostel?",
+                          "Hostel visitation rules",
+                          "Is inter-hostel visitation allowed"
+                      ],
+        "answer":  "Inter-visitation between male and female hostels is not allowed at Godfrey Okoye University. Students must respect hostel boundaries and regulations at all times.",
+        "category":  "Accommodation"
+    },
+    {
+        "intent":  "hostel_meetings",
+        "questions":  [
+                          "Can students hold meetings in hostel?",
+                          "Are hostel meetings allowed?",
+                          "Can I organize a gathering in hostel?",
+                          "Do I need permission for hostel meetings?",
+                          "Rules about meetings in hostel"
+                      ],
+        "answer":  "Students are not permitted to hold meetings in the hostel without prior authorization from the appropriate university authority.",
+        "category":  "Accommodation"
+    },
+    {
+        "intent":  "hostel_dues",
+        "questions":  [
+                          "Are there hostel dues?",
+                          "Do I need to pay hostel fees?",
+                          "How are hostel payments made?",
+                          "What are hostel levies?",
+                          "Do students pay for hostel every semester"
+                      ],
+        "answer":  "At Godfrey Okoye University, hostel dues are paid as part of student fees and are determined by the university. Payments are usually made through the appropriate university channels.",
+        "category":  "Accommodation"
+    },
+    {
+        "intent":  "hostel_cleaning",
+        "questions":  [
+                          "Who cleans the hostel?",
+                          "Are students required to clean?",
+                          "What is manual labour in hostel?",
+                          "Do students participate in cleaning?",
+                          "Hostel sanitation rules"
+                      ],
+        "answer":  "Students are expected to participate in cleaning and maintaining the hostel environment at Godfrey Okoye University, either individually or in assigned groups, to ensure proper hygiene and order.",
+        "category":  "Accommodation"
+    },
+    {
+        "questions":  [
+                          "hostel",
+                          "accommodation",
+                          "student housing",
+                          "where do students stay",
+                          "living on campus"
+                      ],
+        "category":  "Accommodation",
+        "answer":  "Godfrey Okoye University provides hostel accommodation for students within and around the campus. Hostels are structured to ensure safety, discipline, and a conducive learning environment. Students are expected to comply with hostel rules and regulations at all times.",
+        "keywords":  [
+                         "hostel",
+                         "accommodation",
+                         "student housing",
+                         "where do students stay",
+                         "living on campus"
+                     ],
+        "intent":  "hostel_overview"
+    },
+    {
+        "questions":  [
+                          "apply for hostel",
+                          "hostel booking",
+                          "how to get hostel",
+                          "accommodation registration"
+                      ],
+        "category":  "Accommodation",
+        "answer":  "To secure hostel accommodation at Godfrey Okoye University, you are required to apply through the appropriate university channel, usually after paying required fees. Allocation is subject to availability and university approval.",
+        "keywords":  [
+                         "apply for hostel",
+                         "hostel booking",
+                         "how to get hostel",
+                         "accommodation registration"
+                     ],
+        "intent":  "hostel_application"
+    },
+    {
+        "questions":  [
+                          "hostel rules",
+                          "rules in hostel",
+                          "hostel regulations",
+                          "what is allowed in hostel"
+                      ],
+        "category":  "Accommodation",
+        "answer":  "Students in the hostel must adhere to university regulations, including maintaining discipline, respecting fellow students, observing curfew where applicable, and avoiding prohibited activities. Violations may lead to penalties or withdrawal of accommodation.",
+        "keywords":  [
+                         "hostel rules",
+                         "rules in hostel",
+                         "hostel regulations",
+                         "what is allowed in hostel"
+                     ],
+        "intent":  "hostel_rules"
+    },
+    {
+        "questions":  [
+                          "dressing in hostel",
+                          "dress code hostel",
+                          "what to wear in hostel"
+                      ],
+        "category":  "Accommodation",
+        "answer":  "Students are expected to maintain decent and appropriate dressing within the hostel environment, in line with the standards of Godfrey Okoye University. Indecent dressing is discouraged and may attract disciplinary action.",
+        "keywords":  [
+                         "dressing in hostel",
+                         "dress code hostel",
+                         "what to wear in hostel"
+                     ],
+        "intent":  "hostel_dressing"
+    },
+    {
+        "questions":  [
+                          "hostel allocation",
+                          "room allocation",
+                          "how rooms are assigned"
+                      ],
+        "category":  "Accommodation",
+        "answer":  "Hostel rooms are allocated by the university management based on availability and student eligibility. Students are expected to occupy only rooms officially assigned to them.",
+        "keywords":  [
+                         "hostel allocation",
+                         "room allocation",
+                         "how rooms are assigned"
+                     ],
+        "intent":  "hostel_allocation"
+    },
+    {
+        "questions":  [
+                          "issue with hostel",
+                          "hostel problem",
+                          "room problem",
+                          "complain hostel"
+                      ],
+        "category":  "Accommodation",
+        "answer":  "If you are experiencing issues in your hostel, you should report to the hostel supervisor or Student Affairs Unit immediately for assistance and resolution.",
+        "keywords":  [
+                         "issue with hostel",
+                         "hostel problem",
+                         "room problem",
+                         "complain hostel"
+        ],
+        "intent":  "hostel_problem"
+    },
+    {
+        "questions":  [
+                          "hostel application",
+                          "hostel booking",
+                          "how to apply for hostel",
+                          "i need a hostel",
+                          "hostel registration"
+                      ],
+        "category":  "hostel",
+        "answer":  "If you want hostel accommodation at Godfrey Okoye University, follow these steps.\n\nFirst, confirm that you have paid your required school fees, because hostel allocation is usually tied to payment status.\n\nNext, check the student portal for hostel application if it is available.\n\nIf the portal option is not available or you are unsure, go directly to the Hostel Management Office on campus.\n\nHostel spaces are limited, so it is important to act early.\n\nIf you tell me your level and whether you have paid your fees, I can guide you more precisely.",
+        "keywords":  [
+                         "hostel application",
+                         "hostel booking",
+                         "how to apply for hostel",
+                         "i need a hostel",
+                         "hostel registration"
+                     ],
+        "intent":  "hostel_application"
+    },
+    {
+        "questions":  [
+                          "hostel full",
+                          "no space",
+                          "no accommodation",
+                          "hostels are full",
+                          "bedspace unavailable"
+                      ],
+        "category":  "hostel",
+        "answer":  "If hostel spaces are full, you still have a few options.\n\nYou can check with the Hostel Office to see if there is a waiting list or any newly available spaces.\n\nSometimes spaces open up after initial allocation.\n\nYou can also ask about alternative hostels or approved off-campus accommodation.\n\nIf you want, tell me your level and when you applied, and I will guide you on the best next step.",
+        "keywords":  [
+                         "hostel full",
+                         "no space",
+                         "no accommodation",
+                         "hostels are full",
+                         "bedspace unavailable"
+                     ],
+        "intent":  "hostel_full"
+    },
+    {
+        "questions":  [
+                          "hostel problem",
+                          "my room has issues",
+                          "no water",
+                          "electricity problem",
+                          "complain about hostel",
+                          "hostel complaint",
+                          "complain hostel",
+                          "room issue"
+                      ],
+        "category":  "hostel",
+        "answer":  "If you are having issues in your hostel, you should report it immediately.\n\nGo to the Hostel Office or speak to your hostel supervisor.\n\nFor urgent issues like water or electricity, report it the same day so it can be fixed quickly.\n\nIf the issue is not resolved, you can escalate it through Student Affairs.\n\nTell me the exact problem and your hostel, and I can guide you on what to do next.",
+        "keywords":  [
+                         "hostel problem",
+                         "my room has issues",
+                         "no water",
+                         "electricity problem",
+                         "complain about hostel",
+                         "hostel complaint",
+                         "complain hostel",
+                         "room issue"
+                     ],
+        "intent":  "hostel_issue"
+    },
+    {
+        "questions":  [
+                          "change hostel",
+                          "change room",
+                          "i want to move hostel",
+                          "move hostel",
+                          "room change"
+                      ],
+        "category":  "hostel",
+        "answer":  "If you want to change your hostel or room, you need approval.\n\nStart by going to the Hostel Office and explain your reason.\n\nValid reasons like health, safety, or serious discomfort are more likely to be approved.\n\nDo not move without approval, as it may cause issues with your accommodation records.\n\nIf you tell me your reason, I can help you prepare what to say.",
+        "keywords":  [
+                         "change hostel",
+                         "change room",
+                         "i want to move hostel",
+                         "move hostel",
+                         "room change"
+                     ],
+        "intent":  "hostel_change"
+    },
+    {
+        "questions":  [
+                          "i have not registered",
+                          "i\u0027ve not registered",
+                          "not done course registration",
+                          "didn\u0027t register courses",
+                          "course registration not done"
+                      ],
+        "category":  "Registration",
+        "answer":  "If you have not registered your courses yet at Godfrey Okoye University, you should act immediately. Course registration is required for you to be recognized for lectures and examinations. Log in to the student portal and complete your registration if it is still open. If the deadline is close or has passed, contact your department or academic adviser as soon as possible to request guidance on late registration.",
+        "keywords":  [
+                         "i have not registered",
+                         "i\u0027ve not registered",
+                         "not done course registration",
+                         "didn\u0027t register courses",
+                         "course registration not done"
+                     ],
+        "intent":  "registration_not_done"
+    },
+    {
+        "questions":  [
+                          "registration deadline",
+                          "deadline for course registration",
+                          "when will registration close",
+                          "registration closing date"
+                      ],
+        "category":  "Registration",
+        "answer":  "Course registration at Godfrey Okoye University is strictly time-bound. Students are expected to complete registration before the official deadline. Missing the deadline may result in penalties or loss of eligibility to sit for examinations. Always check the academic calendar or portal announcements for exact dates.",
+        "keywords":  [
+                         "registration deadline",
+                         "deadline for course registration",
+                         "when will registration close",
+                         "registration closing date"
+                     ],
+        "intent":  "registration_deadline"
+    },
+    {
+        "questions":  [
+                          "late registration",
+                          "can i register late",
+                          "missed registration",
+                          "registration after deadline"
+                      ],
+        "category":  "Registration",
+        "answer":  "Late course registration may be allowed at Godfrey Okoye University, but it usually requires approval and may attract a penalty fee. You should immediately visit your department or academic adviser to request permission and understand the process.",
+        "keywords":  [
+                         "late registration",
+                         "can i register late",
+                         "missed registration",
+                         "registration after deadline"
+                     ],
+        "intent":  "registration_late"
+    },
+    {
+        "questions":  [
+                          "what happens if i don\u0027t register",
+                          "effect of not registering",
+                          "if i don\u0027t do course registration",
+                          "will it affect me if i don\u0027t register"
+                      ],
+        "category":  "Registration",
+        "answer":  "If you do not complete your course registration at Godfrey Okoye University, you may not be recognized as a valid student for that semester. This can affect your ability to attend exams, receive results, or progress academically. It is very important to complete registration within the approved period.",
+        "keywords":  [
+                         "what happens if i don\u0027t register",
+                         "effect of not registering",
+                         "if i don\u0027t do course registration",
+                         "will it affect me if i don\u0027t register"
+                     ],
+        "intent":  "registration_effect"
+    },
+    {
+        "questions":  [
+                          "cannot register",
+                          "registration not working",
+                          "portal not allowing registration",
+                          "error during course registration"
+                      ],
+        "category":  "Registration",
+        "answer":  "If you are unable to complete your course registration, it may be due to issues such as unpaid fees, portal errors, or missing clearance. First confirm your payment status, then try again. If the issue persists, contact ICT support or your department for assistance.",
+        "keywords":  [
+                         "cannot register",
+                         "registration not working",
+                         "portal not allowing registration",
+                         "error during course registration"
+                     ],
+        "intent":  "registration_error"
+    },
+    {
+        "questions":  [
+                          "requirements for registration",
+                          "what do i need for course registration",
+                          "before registering courses"
+                      ],
+        "category":  "Registration",
+        "answer":  "Before registering your courses at Godfrey Okoye University, you are typically required to have paid your school fees and completed any necessary clearance. You should also follow your department's approved course outline when selecting courses.",
+        "keywords":  [
+                         "requirements for registration",
+                         "what do i need for course registration",
+                         "before registering courses"
+                     ],
+        "intent":  "registration_requirements"
+    },
+    {
+        "questions":  [
+                          "my friend has not registered",
+                          "someone has not registered",
+                          "what if another student did not register"
+                      ],
+        "category":  "Registration",
+        "answer":  "If your friend has not completed course registration at Godfrey Okoye University, they should take immediate action. They need to log in to the student portal and complete registration if possible, or visit their department or academic adviser if the deadline is near or has passed.",
+        "keywords":  [
+                         "my friend has not registered",
+                         "someone has not registered",
+                         "what if another student did not register"
+                     ],
+        "intent":  "registration_friend"
+    }
+]

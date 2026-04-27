@@ -1,0 +1,51 @@
+﻿{% extends "base.html" %}
+
+{% block title %}Chat Interface{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <h2 id="hero-type"></h2>
+</section>
+
+<section class="panel chat-panel">
+    <div class="chat-header">
+        <div>
+            <p class="eyebrow">Governor AI</p>
+            <h2>Student Support Assistant</h2>
+            <p class="meta">Ask about fees, registration, results, hostel allocation, admissions, or schedules.</p>
+        </div>
+        <div class="status-pill">Online</div>
+    </div>
+
+    <div id="chat-window" class="chat-window">
+        <div id="empty-state" class="empty-state">
+            <p>Ask me anything about:</p>
+            <ul>
+                <li>Course Registration</li>
+                <li>Hostel Accommodation</li>
+                <li>School Fees</li>
+                <li>Admissions</li>
+            </ul>
+            <div class="quick-actions">
+                <button type="button" data-quick="How do I register courses?">Register Courses</button>
+                <button type="button" data-quick="Hostel application process">Hostel</button>
+                <button type="button" data-quick="School fees payment">Fees</button>
+            </div>
+        </div>
+        <div class="message bot">
+            <div class="bubble" id="welcome">Welcome. Share your question and I will guide you to the right office or next step.</div>
+            <span class="stamp" data-init-time></span>
+        </div>
+    </div>
+
+    <div id="typing-indicator" class="typing-indicator hidden">Governor is typing...</div>
+
+    <form id="chat-form" class="input-area">
+        <input id="chat-input" type="text" placeholder="Ask about registration, hostel, fees..." required />
+        <button type="submit">Send</button>
+    </form>
+</section>
+
+<script src="{{ url_for('static', filename='js/hero-typewriter.js') }}"></script>
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+{% endblock %}

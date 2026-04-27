@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}Chat Logs{% endblock %}
+
+{% block content %}
+<section class="panel">
+    <h2>Recent Chat Queries</h2>
+    {% if logs %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Time</th>
+                <th>Question</th>
+                <th>Intent</th>
+                <th>Response</th>
+                <th>Confidence</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in logs %}
+            <tr>
+                <td>{{ entry.id }}</td>
+                <td>{{ entry.timestamp }}</td>
+                <td>{{ entry.question }}</td>
+                <td>{{ entry.intent or "(none)" }}</td>
+                <td>{{ entry.response }}</td>
+                <td>{{ entry.confidence }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>No log entries yet.</p>
+    {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,58 @@
+[
+  {
+    "office_name": "Admissions Office",
+    "description": "Handles admission status, acceptance, clearance, and screening inquiries.",
+    "email": "admissions@gouni.edu.ng",
+    "phone": "+234-900-000-1001",
+    "location": "Administrative Building, Ground Floor"
+  },
+  {
+    "office_name": "Bursary Office",
+    "description": "Supports tuition payments, invoices, receipts, and fee-related guidance.",
+    "email": "bursary@gouni.edu.ng",
+    "phone": "+234-900-000-1002",
+    "location": "Administrative Building, Finance Wing"
+  },
+  {
+    "office_name": "Student Affairs Office",
+    "description": "Supports student welfare, hostel concerns, counseling, and general student services.",
+    "email": "studentaffairs@gouni.edu.ng",
+    "phone": "+234-900-000-1003",
+    "location": "Student Affairs Complex, Main Campus"
+  },
+  {
+    "office_name": "Exams and Records Office",
+    "description": "Handles results, transcript requests, and academic record verification.",
+    "email": "records@gouni.edu.ng",
+    "phone": "+234-900-000-1004",
+    "location": "Academic Affairs Block, First Floor"
+  },
+  {
+    "office_name": "Academic Affairs Office",
+    "description": "Supports course registration, academic planning, and graduation-related matters.",
+    "email": "academicaffairs@gouni.edu.ng",
+    "phone": "+234-900-000-1005",
+    "location": "Senate Building, Academic Registry"
+  },
+  {
+    "office_name": "ICT Support Unit",
+    "description": "Provides support for portal access, account issues, and technical troubleshooting.",
+    "email": "ictsupport@gouni.edu.ng",
+    "phone": "+234-900-000-1006",
+    "location": "ICT Centre, Main Campus"
+  },
+  {
+    "office_name": "Vice Chancellor's Office",
+    "description": "Receives formal correspondence and high-level administrative requests.",
+    "email": "vc.office@gouni.edu.ng",
+    "phone": "+234-900-000-1007",
+    "location": "VC Secretariat, Administrative Block"
+  },
+  {
+    "office_name": "Registrar's Office",
+    "description": "Handles official records, policies, student documentation, and institutional communications.",
+    "email": "registrar@gouni.edu.ng",
+    "phone": "+234-900-000-1008",
+    "location": "Registry Department, Administrative Block"
+  }
+]
