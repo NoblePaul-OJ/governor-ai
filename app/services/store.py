@@ -1,12 +1,15 @@
 from datetime import datetime
+import uuid
 
-from flask import has_app_context
+from flask import has_app_context, session
 
 from app.services.task_requests_db import get_query_insights, save_chat_log
 
 # In-memory query log for prototype stage.
 QUERY_LOGS = []
 QUERY_QUERY_COUNTS = {}
+STORE_DATA = {}
+SESSION_PROFILE_KEY = "_governor_profile_session_id"
 CONVERSATION_STATE = {
     "topic": None,
     "intent": None,
@@ -104,6 +107,40 @@ def add_log(
 
 def get_conversation_state():
     return CONVERSATION_STATE
+
+
+def load_store():
+    return STORE_DATA
+
+
+def save_store(data):
+    global STORE_DATA
+    STORE_DATA = data
+    return STORE_DATA
+
+
+def get_session_id():
+    if has_app_context():
+        session_id = session.get(SESSION_PROFILE_KEY)
+        if not session_id:
+            session_id = uuid.uuid4().hex
+            session[SESSION_PROFILE_KEY] = session_id
+            session.modified = True
+        return session_id
+
+    return "default-session"
+
+
+def get_user_profile(session_id):
+    data = load_store()
+    return data.get(session_id, {}).get("profile", {})
+
+
+def set_user_profile(session_id, profile):
+    data = load_store()
+    bucket = data.setdefault(session_id, {})
+    bucket["profile"] = dict(profile or {})
+    return bucket["profile"]
 
 
 def reset_conversation_state():

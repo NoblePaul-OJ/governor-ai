@@ -92,6 +92,29 @@ def _humanize_subject(answer):
     return text
 
 
+def inject_confident_context(response, profile):
+    if not profile:
+        return response
+
+    name = str(profile.get("name") or "").strip()
+    dept = str(profile.get("department") or "").strip()
+    level = str(profile.get("level") or "").strip()
+
+    intro = ""
+
+    if name:
+        intro += f"{name}, "
+
+    if dept and level:
+        intro += f"you are a {level} level student of {dept}. "
+    elif dept:
+        intro += f"you are in the {dept} department. "
+    elif level:
+        intro += f"you are a {level} level student. "
+
+    return f"{intro}{response}" if intro else response
+
+
 def _split_list(text):
     parts = [p.strip() for p in re.split(r",|;", text) if p.strip()]
     if len(parts) >= 2:
@@ -152,11 +175,31 @@ def _extract_bullets(answer):
     return intro, items
 
 
-def format_response(answer, user_input=None, category=None):
+def trim_response(response):
+    # Remove excessive questions
+    lines = str(response or "").split("\n")
+
+    cleaned = []
+    question_count = 0
+
+    for line in lines:
+        if "?" in line:
+            question_count += 1
+            if question_count > 2:
+                continue
+        cleaned.append(line)
+
+    return "\n".join(cleaned)
+
+
+def format_response(answer, user_input=None, category=None, profile=None):
     base = _humanize_subject(answer)
     base = base.strip()
     if not base:
         base = _FALLBACK_RESPONSE
+
+    if profile:
+        return inject_confident_context(base, profile)
 
     if category and str(category).lower() == "conversational":
         return base
@@ -179,4 +222,5 @@ def format_response(answer, user_input=None, category=None):
     if _needs_guidance(user_input):
         formatted = formatted + "\n" + random.choice(_GUIDANCE_LINES)
 
-    return formatted
+    response = trim_response(formatted)
+    return response

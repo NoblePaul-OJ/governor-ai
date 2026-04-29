@@ -3,6 +3,7 @@ import re
 
 from flask import session
 
+from app.services.store import get_session_id, get_user_profile
 from app.services.task_requests_db import save_task_request
 
 
@@ -321,7 +322,7 @@ _HOSTEL_SUPPORT_PHRASES = {
 }
 
 _TASK_HINT = (
-    "You can say hostel booking, VC appointment, contact request, complaint or issue report, or transcript request."
+    "You can say hostel booking, VC appointment, contact request, complaint or issue report, transcript request, or travel permission."
 )
 
 _SESSION_KEY = "task_flow_state"
@@ -373,6 +374,42 @@ def _is_hostel_booking_message(normalized):
     booking_signals = {"apply", "application", "book", "booking", "register", "registration", "need", "want"}
     words = set(normalized.split())
     return bool(words & hostel_terms) and bool(words & booking_signals)
+
+
+def handle_travel_permission(profile):
+    response = ""
+
+    response += "If you want permission to travel, you need to go through the Student Affairs process.\n\n"
+
+    response += "First, write a simple request stating your reason for travel and how long you will be away.\n\n"
+
+    response += "Then take it to the Student Affairs Office for approval.\n\n"
+
+    response += "If required, you may also need endorsement from your department.\n\n"
+
+    response += "Student Affairs Contact:\n"
+    response += "Phone: 08166915454\n"
+    response += "Office: Not available yet\n\n"
+
+    response += "For urgent cases, it is better to go there physically rather than relying only on calls."
+
+    if profile:
+        name = str(profile.get("name") or "").strip()
+        dept = str(profile.get("department") or "").strip()
+        level = str(profile.get("level") or "").strip()
+        intro = ""
+        if name:
+            intro += f"{name}, "
+        if dept and level:
+            intro += f"you are a {level} level student of {dept}. "
+        elif dept:
+            intro += f"you are in the {dept} department. "
+        elif level:
+            intro += f"you are a {level} level student. "
+        if intro:
+            response = intro + response
+
+    return response
 
 
 def _detect_intent(message):
@@ -1246,6 +1283,7 @@ def process_task_message(question, conversation_state):
     task_state = _ensure_task_state(conversation_state)
     active_task = task_state.get("active_task")
     current_step = task_state.get("current_step")
+    profile = get_user_profile(get_session_id())
 
     if active_task and _is_cancel_message(question):
         _reset_active_workflow(task_state)
@@ -1261,6 +1299,20 @@ def process_task_message(question, conversation_state):
             "request_id": None,
         }
 
+    detected_intent = _detect_intent(question)
+    if detected_intent == "travel_permission":
+        reply = handle_travel_permission(profile)
+        return {
+            "handled": True,
+            "reply": reply,
+            "task_key": "travel_permission",
+            "task_label": "Travel Permission",
+            "output_type": "request_summary",
+            "current_step": None,
+            "completed": True,
+            "request_id": None,
+        }
+
     vc_result = _process_vc_message(question, conversation_state)
     if vc_result.get("handled"):
         return vc_result
@@ -1269,7 +1321,7 @@ def process_task_message(question, conversation_state):
     active_task = task_state.get("active_task")
 
     if not active_task:
-        detected = _detect_intent(question)
+        detected = detected_intent
         if not detected:
             return {"handled": False}
 

@@ -1,4 +1,10 @@
+import json
+import os
 import re
+import tempfile
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, request
 
@@ -10,12 +16,17 @@ from app.services.store import (
     QUERY_LOGS,
     add_log,
     get_conversation_state,
+    get_session_id,
+    get_user_profile,
+    set_user_profile,
     update_conversation_state,
 )
+from app.services.response_formatter import format_response
 from app.services.task_flow import process_task_message
 from app.services.task_requests_db import list_chat_logs
 
 chat_bp = Blueprint("chat", __name__)
+FEEDBACK_LOCK = threading.Lock()
 
 SMART_FALLBACK_MESSAGE = (
     "I'm having a slight delay right now, but I can still help. "
@@ -85,6 +96,88 @@ GENERAL_CONTACT_PROMPT = (
     "Use clean paragraphs with line breaks and no bullets or markdown symbols."
 )
 
+FOLLOW_UP_STYLE_GUIDANCE = (
+    "Do not ask multiple follow-up questions unnecessarily. "
+    "Answer the user's current statement first. "
+    "Only ask ONE clarifying question if it is absolutely necessary. "
+    "Avoid question lists and interrogation-style replies. "
+    "Prefer direct guidance and a calm, conversational tone. "
+    "Make the response feel natural, not like a checklist."
+)
+
+HUMAN_RESPONSE_GUIDANCE = (
+    "Respond naturally to the user's tone and intent. "
+    "Not every message requires a formal or administrative response. "
+    "If the user is expressing emotion, confusion, or casual conversation, respond appropriately before introducing solutions. "
+    "If the user is venting, acknowledge first. "
+    "If the user is joking, respond lightly. "
+    "If the user is unclear, interpret before asking. "
+    "Avoid immediately pushing institutional processes or forcing every reply into office or adviser guidance. "
+    "Allow short, human responses when appropriate. "
+    "Only introduce university-specific guidance when it becomes necessary."
+)
+
+
+def _feedback_file_path():
+    path = Path(current_app.root_path) / "data" / "feedback.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _load_feedback_entries(path):
+    if not path.exists():
+        return []
+
+    try:
+        raw = path.read_text(encoding="utf-8").strip()
+        if not raw:
+            return []
+
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return data
+    except (OSError, json.JSONDecodeError):
+        current_app.logger.warning("Feedback store could not be read cleanly; starting a new list.")
+
+    return []
+
+
+def _write_feedback_entries(path, entries):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_handle = None
+    tmp_path = None
+    try:
+        tmp_handle = tempfile.NamedTemporaryFile(
+            mode="w",
+            delete=False,
+            dir=str(path.parent),
+            prefix=f"{path.stem}_",
+            suffix=".tmp",
+            encoding="utf-8",
+        )
+        tmp_path = Path(tmp_handle.name)
+        json.dump(entries, tmp_handle, ensure_ascii=False, indent=2)
+        tmp_handle.flush()
+        os.fsync(tmp_handle.fileno())
+    finally:
+        if tmp_handle is not None:
+            tmp_handle.close()
+
+    if tmp_path is None:
+        raise RuntimeError("Unable to create a temporary feedback file")
+
+    os.replace(tmp_path, path)
+
+
+def _append_feedback_entry(entry):
+    path = _feedback_file_path()
+    with FEEDBACK_LOCK:
+        entries = _load_feedback_entries(path)
+        entries.append(entry)
+        _write_feedback_entries(path, entries)
+
+
+
 
 def _history_messages(conversation_state, limit=5):
     history = conversation_state.get("history", [])
@@ -137,6 +230,161 @@ def _render_kb_entries(entries):
             )
         )
     return "\n\n".join(blocks)
+
+
+def _normalize_user_context(user):
+    if not isinstance(user, dict):
+        user = {}
+
+    name = str(user.get("name") or "").strip()
+    department = str(user.get("department") or "").strip()
+    level = str(user.get("level") or "").strip()
+
+    if not any([name, department, level]):
+        return {}
+
+    return {
+        "name": name,
+        "department": department,
+        "level": level,
+    }
+
+
+def _render_user_context(user):
+    user = _normalize_user_context(user)
+    if not user:
+        return "No user profile available."
+
+    parts = []
+    if user.get("name"):
+        parts.append(f"The user's name is {user['name']}.")
+    if user.get("department") and user.get("level"):
+        parts.append(
+            f"The user is a {user['level']}-level student in the {user['department']} department."
+        )
+    elif user.get("department"):
+        parts.append(f"The user is in the {user['department']} department.")
+    elif user.get("level"):
+        parts.append(f"The user is a {user['level']}-level student.")
+
+    parts.append(
+        "Use this context to personalize responses, avoid asking for already known information, and only mention it when relevant."
+    )
+    return " ".join(parts)
+
+
+def _render_user_followup_guidance(user):
+    user = _normalize_user_context(user)
+    if not user:
+        return (
+            "No user profile is available. Ask for personal details only if they are strictly necessary."
+        )
+
+    known_fields = []
+    missing_fields = []
+    for field in ("name", "department", "level"):
+        if user.get(field):
+            known_fields.append(field)
+        else:
+            missing_fields.append(field)
+
+    known_text = ", ".join(known_fields) if known_fields else "none"
+    missing_text = ", ".join(missing_fields) if missing_fields else "none"
+
+    if user.get("department") and user.get("level"):
+        return (
+            "The user's department and level are already known. Do not ask for them again. "
+            f"Known profile fields: {known_text}. Missing profile fields: {missing_text}. "
+            "Only ask for missing information if it is absolutely necessary to answer the user's question."
+        )
+
+    if user.get("department"):
+        return (
+            "The user's department is already known. Do not ask for it again. "
+            f"Known profile fields: {known_text}. Missing profile fields: {missing_text}. "
+            "Only ask for missing information if it is absolutely necessary to answer the user's question."
+        )
+
+    if user.get("level"):
+        return (
+            "The user's level is already known. Do not ask for it again. "
+            f"Known profile fields: {known_text}. Missing profile fields: {missing_text}. "
+            "Only ask for missing information if it is absolutely necessary to answer the user's question."
+        )
+
+    return (
+        f"Known profile fields: {known_text}. Missing profile fields: {missing_text}. "
+        "Only ask for missing information if it is absolutely necessary to answer the user's question."
+    )
+
+
+def _build_personalized_fallback_message(user):
+    user = _normalize_user_context(user)
+    if not user:
+        return SMART_FALLBACK_MESSAGE
+
+    name = user.get("name") or "there"
+    if user.get("department") and user.get("level"):
+        context_hint = (
+            f" I can tailor this for a {user['level']} level {user['department']} student if that helps."
+        )
+    elif user.get("department"):
+        context_hint = f" I can tailor this for your {user['department']} department if that helps."
+    elif user.get("level"):
+        context_hint = f" I can tailor this for your {user['level']} level if that helps."
+    else:
+        context_hint = ""
+
+    return (
+        f"Sorry {name}, I'm having a slight delay right now, but I can still help. "
+        f"Could you rephrase or ask again?{context_hint}"
+    )
+
+
+def _build_intelligent_fallback_message(question, user=None, context_messages=None, kb_entries=None):
+    normalized = _normalize_text(question)
+    user = _normalize_user_context(user)
+    context_messages = context_messages or []
+    kb_entries = kb_entries or []
+
+    if not normalized:
+        return _build_personalized_fallback_message(user)
+
+    if any(word in normalized for word in {"hard", "stress", "stressed", "overwhelmed", "tired", "sad", "frustrated", "confused"}):
+        return "Sounds like things are a bit overwhelming right now. Is this about school stress, or something else?"
+
+    if any(word in normalized for word in {"funny", "lol", "lmao", "joking", "joke", "haha"}):
+        return "Haha, what do you mean by that exactly? Are they stressing you out or just acting funny?"
+
+    if any(word in normalized for word in {"life", "life is hard", "everything", "nothing", "bad"}):
+        return "That sounds heavy. Want to tell me a bit more about what’s making it feel that way?"
+
+    if kb_entries:
+        top_entry = kb_entries[0] or {}
+        answer = str(top_entry.get("answer") or "").strip()
+        matched_question = str(top_entry.get("matched_question") or "").strip().lower()
+        if answer:
+            return f"I may be close here: {answer}"
+        if matched_question:
+            return f"I might be hearing something like '{matched_question}'. Can you confirm if that’s what you mean?"
+
+    if context_messages:
+        recent_user_message = next(
+            (
+                str(msg.get("content") or "").strip()
+                for msg in reversed(context_messages)
+                if str(msg.get("role") or "").lower() == "user" and str(msg.get("content") or "").strip()
+            ),
+            "",
+        )
+        if recent_user_message:
+            return f"I’m not fully sure, but it sounds like you mean: {recent_user_message}. Tell me a little more and I’ll help."
+
+    if user:
+        name = user.get("name") or "there"
+        return f"Sorry {name}, I’m not fully sure yet, but I can help if you tell me a little more about what’s going on."
+
+    return "I’m not fully sure yet, but I can help if you tell me a little more about what’s going on."
 
 
 def _normalize_text(text):
@@ -205,8 +453,10 @@ def _detect_hostel_key(normalized_text):
     return None
 
 
-def _build_contact_prompt(question, context_messages):
+def _build_contact_prompt(question, context_messages, user=None):
     context_text = _render_context(context_messages)
+    user_text = _render_user_context(user)
+    user_guidance = _render_user_followup_guidance(user)
     directory_snapshot = "\n".join(
         [
             "VC contact",
@@ -228,6 +478,12 @@ def _build_contact_prompt(question, context_messages):
 
     return (
         f"{GENERAL_CONTACT_PROMPT}\n\n"
+        f"{FOLLOW_UP_STYLE_GUIDANCE}\n\n"
+        f"{HUMAN_RESPONSE_GUIDANCE}\n\n"
+        "User profile context:\n"
+        f"{user_text}\n\n"
+        "Follow-up guidance:\n"
+        f"{user_guidance}\n\n"
         "Current user message:\n"
         f"{question}\n\n"
         "Relevant conversation context:\n"
@@ -237,7 +493,7 @@ def _build_contact_prompt(question, context_messages):
     )
 
 
-def _handle_directory_contact(question, context_messages):
+def _handle_directory_contact(question, context_messages, user=None):
     normalized = _normalize_text(question)
     if not normalized:
         return {"handled": False}
@@ -383,7 +639,7 @@ def _handle_directory_contact(question, context_messages):
             "matched_question": None,
             "fallback": False,
             "use_llm": True,
-            "prompt": _build_contact_prompt(question, context_messages),
+            "prompt": _build_contact_prompt(question, context_messages, user=user),
         }
 
     return {"handled": False}
@@ -408,12 +664,20 @@ def _is_contact_request(question):
     return _contains_any(normalized, contact_signals)
 
 
-def _build_prompt(question, context_messages, kb_entries, extra_instructions=None):
+def _build_prompt(question, context_messages, kb_entries, extra_instructions=None, user=None):
     context_text = _render_context(context_messages)
     kb_text = _render_kb_entries(kb_entries)
+    user_text = _render_user_context(user)
+    user_guidance = _render_user_followup_guidance(user)
     extra_text = f"\n\nSpecial instructions:\n{extra_instructions}" if extra_instructions else ""
 
     return (
+        "User profile context:\n"
+        f"{user_text}\n\n"
+        f"{FOLLOW_UP_STYLE_GUIDANCE}\n\n"
+        f"{HUMAN_RESPONSE_GUIDANCE}\n\n"
+        "Follow-up guidance:\n"
+        f"{user_guidance}\n\n"
         "Current user message:\n"
         f"{question}\n\n"
         "Relevant conversation context (last 3 to 5 messages):\n"
@@ -424,16 +688,29 @@ def _build_prompt(question, context_messages, kb_entries, extra_instructions=Non
         "How to respond:\n"
         "1. Interpret all natural language naturally.\n"
         "2. Decide whether to answer conversationally, use knowledge base information, or combine both.\n"
-        "3. If the query is unrelated, respond conversationally and gently guide back to university context when appropriate.\n"
-        "4. Keep the response clean and conversational.\n"
-        "5. Use short paragraphs with line breaks. Avoid markdown symbols like *, #, or heavy bullet formatting."
+        "3. Do not ask for department or level if they are already in the profile context.\n"
+        "4. Only ask for missing personal information if it is absolutely necessary to answer the user's question.\n"
+        "5. If the query is unrelated, respond conversationally and gently guide back to university context when appropriate.\n"
+        "6. Keep the response clean and conversational.\n"
+        "7. Use short paragraphs with line breaks. Avoid markdown symbols like *, #, or heavy bullet formatting."
     )
+
+
+def _finalize_response(response, question, category=None, profile=None):
+    return format_response(response, user_input=question, category=category, profile=profile)
 
 
 @chat_bp.post("/api/chat")
 def chat_api():
     payload = request.get_json(silent=True) or {}
     question = (payload.get("message") or "").strip()
+    user = _normalize_user_context(payload.get("user", {}))
+    session_id = get_session_id()
+    profile = get_user_profile(session_id)
+
+    if user:
+        profile = user
+        set_user_profile(session_id, profile)
 
     if not question:
         return jsonify({"error": "message is required"}), 400
@@ -466,6 +743,7 @@ def chat_api():
             status = "task_cancelled"
 
         confidence = 1.0 if task_key else 0.0
+        response = _finalize_response(response, question, category="task_workflow", profile=profile)
         update_conversation_state(message=response, role="assistant", history_limit=12)
         log_entry = add_log(
             question=question,
@@ -501,10 +779,10 @@ def chat_api():
             }
         )
 
-    directory_result = _handle_directory_contact(question, context_messages)
+    directory_result = _handle_directory_contact(question, context_messages, user=user)
     if directory_result.get("handled"):
         if directory_result.get("use_llm"):
-            prompt = directory_result.get("prompt") or _build_contact_prompt(question, context_messages)
+            prompt = directory_result.get("prompt") or _build_contact_prompt(question, context_messages, user=user)
             timeout_seconds = int(current_app.config.get("OPENAI_TIMEOUT", 25))
             response = call_llm_with_retry(prompt, timeout=timeout_seconds, retries=1)
             if response:
@@ -516,6 +794,7 @@ def chat_api():
             intent_label = directory_result.get("intent")
             confidence = float(directory_result.get("confidence", 0.0) if response else 0.0)
             status = "answered" if response != SMART_FALLBACK_MESSAGE else "unanswered"
+            response = _finalize_response(response, question, category=directory_result.get("category"), profile=profile)
             update_conversation_state(message=response, role="assistant", history_limit=12)
             log_entry = add_log(
                 question=question,
@@ -545,6 +824,7 @@ def chat_api():
         confidence = float(directory_result.get("confidence", 1.0))
         intent_label = directory_result.get("intent")
         update_conversation_state(intent=intent_label, topic=directory_result.get("category"), history_limit=12)
+        response = _finalize_response(response, question, category=directory_result.get("category"), profile=profile)
         update_conversation_state(message=response, role="assistant", history_limit=12)
         log_entry = add_log(
             question=question,
@@ -586,6 +866,7 @@ def chat_api():
                 history_limit=12,
             )
 
+        response = _finalize_response(response, question, category="contact_directory", profile=profile)
         update_conversation_state(message=response, role="assistant", history_limit=12)
         log_entry = add_log(
             question=question,
@@ -633,6 +914,7 @@ def chat_api():
             topic=category,
             history_limit=12,
         )
+        response = _finalize_response(response, question, category=category, profile=profile)
         update_conversation_state(message=response, role="assistant", history_limit=12)
         log_entry = add_log(
             question=question,
@@ -668,7 +950,13 @@ def chat_api():
         if _is_hostel_registration_context(context_messages):
             extra_instructions = f"{extra_instructions}\n\n{HOSTEL_REGISTRATION_NOTE}"
 
-    prompt = _build_prompt(question, context_messages, kb_entries, extra_instructions=extra_instructions)
+    prompt = _build_prompt(
+        question,
+        context_messages,
+        kb_entries,
+        extra_instructions=extra_instructions,
+        user=user,
+    )
     timeout_seconds = int(current_app.config.get("OPENAI_TIMEOUT", 25))
     response = call_llm_with_retry(prompt, timeout=timeout_seconds, retries=1)
 
@@ -695,10 +983,17 @@ def chat_api():
                 response = f"{response}\n\n{note}"
     else:
         current_app.logger.warning("LLM failed after retry, using smart fallback.")
-        response = SMART_FALLBACK_MESSAGE
+        response = _build_intelligent_fallback_message(
+            question,
+            user=user,
+            context_messages=context_messages,
+            kb_entries=kb_entries,
+        )
         source = "llm_fallback"
         fallback = True
         status = "unanswered"
+
+    response = _finalize_response(response, question, category=category, profile=profile)
 
     update_conversation_state(message=response, role="assistant", history_limit=12)
 
@@ -731,6 +1026,32 @@ def chat_api():
             "log_id": log_entry["id"],
         }
     )
+
+
+@chat_bp.post("/api/feedback")
+def feedback_api():
+    payload = request.get_json(silent=True) or {}
+    message = str(payload.get("message") or "").strip()
+    response = str(payload.get("response") or "").strip()
+    feedback = str(payload.get("feedback") or "").strip().lower()
+    comment_value = payload.get("comment")
+    comment = "" if comment_value is None else str(comment_value).strip()
+
+    if not message or not response or feedback not in {"yes", "no"}:
+        return jsonify({"error": "message, response, and feedback are required"}), 400
+
+    data = {
+        "message": message,
+        "response": response,
+        "feedback": feedback,
+        "comment": comment,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+    _append_feedback_entry(data)
+    print("Feedback received:", data)
+
+    return jsonify({"ok": True}), 201
 
 
 @chat_bp.get("/api/logs")

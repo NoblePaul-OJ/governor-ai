@@ -32,6 +32,12 @@ INTENT_RULES = {
         "keywords": ["hostel", "accommodation", "room", "bedspace"],
         "response": "Hostel requests are processed through the accommodation portal during the allocation period.",
     },
+    "travel_permission": {
+        "label": "Travel Permission",
+        "office": "Student Affairs Office",
+        "keywords": ["travel", "permission", "leave school", "travel approval"],
+        "response": "If you need permission to travel, follow the Student Affairs approval process and submit a short request letter.",
+    },
     "academic_schedule": {
         "label": "Academic Schedule",
         "office": "Academic Planning Unit",
