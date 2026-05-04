@@ -16,3 +16,27 @@ def test_unmatched_question():
     result = classify_intent("this is a completely unrelated query")
     assert not result["matched"]
     assert result["confidence"] == 0.0
+
+
+def test_contextual_followup_uses_history():
+    history = [
+        {"role": "user", "content": "I have not registered courses"},
+        {"role": "assistant", "content": "Here are the steps to register courses."},
+    ]
+
+    result = classify_intent("also", history=history)
+    assert result["matched"]
+    assert result["intent_key"] == "course_registration"
+    assert result["contextual"] is True
+
+
+def test_direct_topic_switch_is_marked():
+    history = [
+        {"role": "user", "content": "I have not registered courses"},
+        {"role": "assistant", "content": "Here are the steps to register courses."},
+    ]
+
+    result = classify_intent("hostel", history=history)
+    assert result["matched"]
+    assert result["intent_key"] == "hostel"
+    assert result["topic_shift"] is True

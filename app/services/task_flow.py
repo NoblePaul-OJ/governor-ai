@@ -393,22 +393,6 @@ def handle_travel_permission(profile):
 
     response += "For urgent cases, it is better to go there physically rather than relying only on calls."
 
-    if profile:
-        name = str(profile.get("name") or "").strip()
-        dept = str(profile.get("department") or "").strip()
-        level = str(profile.get("level") or "").strip()
-        intro = ""
-        if name:
-            intro += f"{name}, "
-        if dept and level:
-            intro += f"you are a {level} level student of {dept}. "
-        elif dept:
-            intro += f"you are in the {dept} department. "
-        elif level:
-            intro += f"you are a {level} level student. "
-        if intro:
-            response = intro + response
-
     return response
 
 
@@ -1279,11 +1263,13 @@ def _complete_workflow(task_state, workflow_key, workflow, collected, conversati
     }
 
 
-def process_task_message(question, conversation_state):
+def process_task_message(question, conversation_state, profile=None, session_id=None, history=None):
     task_state = _ensure_task_state(conversation_state)
     active_task = task_state.get("active_task")
     current_step = task_state.get("current_step")
-    profile = get_user_profile(get_session_id())
+    if profile is None:
+        resolved_session_id = session_id or get_session_id()
+        profile = get_user_profile(resolved_session_id)
 
     if active_task and _is_cancel_message(question):
         _reset_active_workflow(task_state)

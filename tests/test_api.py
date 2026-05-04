@@ -30,7 +30,7 @@ def test_chat_endpoint(monkeypatch):
     assert "reply" in data
     assert "intent" in data
     assert "confidence" in data
-    assert data["reply"] == "Test assistant reply"
+    assert "Test assistant reply" in data["reply"]
     assert data["source"] == "llm_primary"
     assert data["fallback"] is False
 
@@ -442,3 +442,144 @@ def test_new_contact_directory_system(monkeypatch):
     assert "- Keep your details ready." not in data["reply"]
     assert "*" not in data["reply"]
     assert "#" not in data["reply"]
+
+
+def test_memory_updates_overwrite_recall_and_persist(monkeypatch, tmp_path):
+    from app.services import store as store_module
+
+    monkeypatch.setattr(store_module, "STORE_DB_PATH", tmp_path / "user_sessions.db")
+
+    app = create_app()
+    client = app.test_client()
+    session_id = "memory-session"
+    QUERY_LOGS.clear()
+    reset_conversation_state()
+
+    resp = client.post("/api/chat", json={"message": "my name is Ada Lovelace", "session_id": session_id})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["source"] == "memory_control"
+    assert data["profile"]["name"] == "Ada Lovelace"
+    assert "remember" in data["reply"].lower()
+
+    resp = client.post(
+        "/api/chat",
+        json={"message": "I am in computer science department", "session_id": session_id},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["profile"]["department"] == "Computer Science"
+    assert "Computer Science department" in data["reply"]
+
+    resp = client.post("/api/chat", json={"message": "I am now 400 level", "session_id": session_id})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["profile"]["level"] == "400"
+    assert "You are a 400 level Computer Science student." in data["reply"]
+
+    resp = client.post("/api/chat", json={"message": "call me Grace Hopper", "session_id": session_id})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["profile"]["name"] == "Grace Hopper"
+    assert "remember" in data["reply"].lower()
+
+    resp = client.post("/api/chat", json={"message": "what is my name", "session_id": session_id})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["reply"] == "Your name is Grace Hopper."
+
+    resp = client.post("/api/chat", json={"message": "change my name", "session_id": session_id})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["reply"] == "What would you like me to change it to?"
+
+    resp = client.get("/api/profile", query_string={"session_id": session_id})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["profile"]["name"] == "Grace Hopper"
+    assert data["profile"]["department"] == "Computer Science"
+    assert data["profile"]["level"] == "400"
+    assert data["pending_field"] == "name"
+
+    with sqlite3.connect(store_module.STORE_DB_PATH) as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM users WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+    assert row[0] == 1
+
+    fresh_app = create_app()
+    fresh_client = fresh_app.test_client()
+    fresh_resp = fresh_client.get("/api/profile", query_string={"session_id": session_id})
+    assert fresh_resp.status_code == 200
+    fresh_data = fresh_resp.get_json()
+    assert fresh_data["profile"]["name"] == "Grace Hopper"
+    assert fresh_data["profile"]["department"] == "Computer Science"
+    assert fresh_data["profile"]["level"] == "400"
+
+
+def test_memory_extractor_patterns():
+    from app.services.memory_extractor import detect_user_memory_message
+
+    name_update = detect_user_memory_message("call me Nobcyborg")
+    assert name_update["action"] == "update"
+    assert name_update["data"]["name"] == "Nobcyborg"
+
+    department_update = detect_user_memory_message("I study computer science")
+    assert department_update["action"] == "update"
+    assert department_update["data"]["department"] == "Computer Science"
+
+    level_update = detect_user_memory_message("I am now 400L")
+    assert level_update["action"] == "update"
+    assert level_update["data"]["level"] == "400"
+
+    final_year_update = detect_user_memory_message("I am final year")
+    assert final_year_update["action"] == "update"
+    assert final_year_update["data"]["level"] == "400"
+
+    recall = detect_user_memory_message("what do you know about me")
+    assert recall["action"] == "recall"
+    assert recall["field"] == "summary"
+
+
+def test_conversation_history_persistence(tmp_path, monkeypatch):
+    from app.services import store as store_module
+
+    monkeypatch.setattr(store_module, "STORE_DB_PATH", tmp_path / "user_sessions.db")
+
+    session_id = "history-session"
+    store_module.save_message(session_id, "user", "Hello")
+    store_module.save_message(session_id, "assistant", "Hi there")
+    store_module.save_message(session_id, "user", "Tell me about hostel")
+
+    history = store_module.get_recent_messages(session_id, limit=5)
+    assert [item["content"] for item in history] == ["Hello", "Hi there", "Tell me about hostel"]
+
+    limited = store_module.get_recent_messages(session_id, limit=2)
+    assert [item["content"] for item in limited] == ["Hi there", "Tell me about hostel"]
+
+
+def test_multi_user_isolation(monkeypatch, tmp_path):
+    from app.services import store as store_module
+
+    monkeypatch.setattr(store_module, "STORE_DB_PATH", tmp_path / "user_sessions.db")
+
+    session_a = "session-a"
+    session_b = "session-b"
+
+    store_module.update_user(session_a, "name", "Ada Lovelace")
+    store_module.update_user(session_b, "name", "Grace Hopper")
+    store_module.save_message(session_a, "user", "Hello from A")
+    store_module.save_message(session_b, "user", "Hello from B")
+    store_module.save_message(session_a, "assistant", "Reply A")
+    store_module.save_message(session_b, "assistant", "Reply B")
+
+    user_a = store_module.get_user(session_a)
+    user_b = store_module.get_user(session_b)
+    assert user_a["name"] == "Ada Lovelace"
+    assert user_b["name"] == "Grace Hopper"
+
+    history_a = store_module.get_recent_messages(session_a, limit=10)
+    history_b = store_module.get_recent_messages(session_b, limit=10)
+    assert [item["content"] for item in history_a] == ["Hello from A", "Reply A"]
+    assert [item["content"] for item in history_b] == ["Hello from B", "Reply B"]

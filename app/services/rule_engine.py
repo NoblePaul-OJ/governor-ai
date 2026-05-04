@@ -11,7 +11,7 @@ INTENT_RULES = {
     "course_registration": {
         "label": "Course Registration",
         "office": "Academic Affairs Office",
-        "keywords": ["register", "registration", "course form", "add course", "drop course"],
+        "keywords": ["register", "registered", "registration", "course form", "add course", "drop course"],
         "response": "Course registration is handled on the student portal within the approved registration window.",
     },
     "results_records": {
@@ -70,13 +70,41 @@ INTENT_RULES = {
     },
 }
 
+_VAGUE_FOLLOWUP_PHRASES = {
+    "also",
+    "and",
+    "what about that",
+    "what about it",
+    "what about hostel",
+    "what about mentor",
+    "mentor",
+    "another thing",
+    "also hostel",
+    "and hostel",
+}
+
 
 def _normalize(text):
     cleaned = re.sub(r"[^a-zA-Z0-9\s]", " ", (text or "").lower())
     return " ".join(cleaned.split())
 
 
-def classify_intent(question):
+def _normalize_history(history):
+    normalized = []
+    for item in history or []:
+        if isinstance(item, dict):
+            role = str(item.get("role") or "").strip().lower() or "user"
+            content = str(item.get("content") or item.get("message") or "").strip()
+        else:
+            role = "user"
+            content = str(item or "").strip()
+
+        if content:
+            normalized.append({"role": role, "content": content})
+    return normalized
+
+
+def _classify_from_text(question):
     normalized = _normalize(question)
     tokens = set(normalized.split())
 
@@ -116,8 +144,72 @@ def classify_intent(question):
             "If this is related to Godfrey Okoye University, I can guide you properly. "
             "If not, I can still give general advice."
         ),
-        "confidence": 0.0,
-    }
+            "confidence": 0.0,
+        }
+
+
+def _is_vague_followup(question):
+    normalized = _normalize(question)
+    if not normalized:
+        return False
+
+    if normalized in _VAGUE_FOLLOWUP_PHRASES:
+        return True
+
+    tokens = normalized.split()
+    if len(tokens) <= 2 and any(token in {"also", "and", "mentor", "hostel", "that", "it"} for token in tokens):
+        return True
+
+    return any(phrase in normalized for phrase in _VAGUE_FOLLOWUP_PHRASES)
+
+
+def _last_relevant_intent_from_history(history):
+    history_items = _normalize_history(history)
+    if not history_items:
+        return None
+
+    user_messages = [item["content"] for item in history_items if item["role"] == "user" and item["content"]]
+    for message in reversed(user_messages):
+        candidate = _classify_from_text(message)
+        if candidate.get("matched"):
+            return candidate
+
+    return None
+
+
+def _last_intent_key_from_history(history):
+    candidate = _last_relevant_intent_from_history(history)
+    if not candidate:
+        return None
+    return candidate.get("intent_key")
+
+
+def classify_intent(question, history=None):
+    direct = _classify_from_text(question)
+    if direct.get("matched"):
+        direct["contextual"] = False
+        direct["topic_shift"] = False
+        previous_intent_key = _last_intent_key_from_history(history)
+        if previous_intent_key and previous_intent_key != direct.get("intent_key"):
+            direct["topic_shift"] = True
+        return direct
+
+    if not history or not _is_vague_followup(question):
+        direct["contextual"] = False
+        direct["topic_shift"] = False
+        return direct
+
+    contextual = _last_relevant_intent_from_history(history)
+    if not contextual:
+        direct["contextual"] = False
+        direct["topic_shift"] = False
+        return direct
+
+    contextual["contextual"] = True
+    contextual["topic_shift"] = False
+    contextual["followup_from_history"] = True
+    contextual["confidence"] = max(0.25, contextual.get("confidence", 0.0) * 0.75)
+    return contextual
 
 
 def get_rules():

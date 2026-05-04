@@ -1,40 +1,19 @@
-import random
-import re
+﻿import re
 
-
-_STEP_INTROS = [
-    "Here's what you need to do:",
-    "You can follow these steps:",
-    "Try this process:",
-]
-
-_BULLET_INTROS = [
-    "Here are the key points:",
-    "Quick breakdown:",
-    "Key items to note:",
-]
-
-_PARA_INTROS = [
-    "Here's a quick answer:",
-    "Sure - here's the gist:",
-    "Got it. Here's the short answer:",
-]
 
 _GUIDANCE_LINES = [
-    "If you can, share your level/department and the exact issue so I can be more specific.",
-    "If anything is unclear, tell me your level and the exact situation, and I'll guide you more precisely.",
-    "If you want, add your level/department and the specific issue so I can narrow it down.",
+    "If you want, send the exact issue and I can narrow it down.",
 ]
 
 _FALLBACK_RESPONSE = (
-    "That's an interesting one. Let me try to help.\n\n"
-    "If this is related to Godfrey Okoye University, I can guide you properly. "
+    "I'm not fully sure yet.\n\n"
+    "If this is related to Godfrey Okoye University, I can help more precisely. "
     "If not, I can still give general advice."
 )
 
 
 def _normalize(text):
-    cleaned = re.sub(r"[^a-zA-Z0-9\\s]", " ", (text or "").lower())
+    cleaned = re.sub(r"[^a-zA-Z0-9\s]", " ", (text or "").lower())
     return " ".join(cleaned.split())
 
 
@@ -92,27 +71,15 @@ def _humanize_subject(answer):
     return text
 
 
-def inject_confident_context(response, profile):
+def _should_inject_memory(user_input, profile, category=None):
     if not profile:
-        return response
+        return False
 
-    name = str(profile.get("name") or "").strip()
-    dept = str(profile.get("department") or "").strip()
-    level = str(profile.get("level") or "").strip()
+    return False
 
-    intro = ""
 
-    if name:
-        intro += f"{name}, "
-
-    if dept and level:
-        intro += f"you are a {level} level student of {dept}. "
-    elif dept:
-        intro += f"you are in the {dept} department. "
-    elif level:
-        intro += f"you are a {level} level student. "
-
-    return f"{intro}{response}" if intro else response
+def inject_confident_context(response, profile):
+    return response
 
 
 def _split_list(text):
@@ -147,13 +114,7 @@ def _extract_steps(answer):
     if len(items) < 2:
         return None
 
-    if prefix:
-        prefix = prefix.rstrip(",")
-        intro = f"Here's what you need to do {prefix.lower()}:"
-    else:
-        intro = random.choice(_STEP_INTROS)
-
-    return intro, items
+    return prefix, items
 
 
 def _extract_bullets(answer):
@@ -167,12 +128,7 @@ def _extract_bullets(answer):
     if len(items) < 2:
         return None
 
-    if prefix:
-        intro = f"{prefix}:"
-    else:
-        intro = random.choice(_BULLET_INTROS)
-
-    return intro, items
+    return prefix, items
 
 
 def trim_response(response):
@@ -198,29 +154,41 @@ def format_response(answer, user_input=None, category=None, profile=None):
     if not base:
         base = _FALLBACK_RESPONSE
 
-    if profile:
-        return inject_confident_context(base, profile)
+    if _should_inject_memory(user_input, profile, category=category):
+        base = inject_confident_context(base, profile)
 
     if category and str(category).lower() == "conversational":
-        return base
+        return trim_response(base)
     if base.startswith("I\u2019m Governor AI for Godfrey Okoye University."):
-        return base
+        return trim_response(base)
 
     steps = _extract_steps(base)
     if steps:
-        intro, items = steps
-        formatted = intro + "\n" + "\n".join(f"- {item}" for item in items)
+        prefix, items = steps
+        lines = []
+        if prefix:
+            lines.append(prefix.rstrip(" ,:"))
+            lines.append("")
+        lines.extend(f"{index}. {item}" for index, item in enumerate(items, start=1))
+        formatted = "\n".join(lines)
     else:
         bullets = _extract_bullets(base)
         if bullets:
-            intro, items = bullets
-            formatted = intro + "\n" + "\n".join(f"- {item}" for item in items)
+            prefix, items = bullets
+            lines = []
+            if prefix:
+                lines.append(prefix.rstrip(" ,:"))
+                lines.append("")
+            lines.extend(f"{index}. {item}" for index, item in enumerate(items, start=1))
+            formatted = "\n".join(lines)
         else:
-            intro = random.choice(_PARA_INTROS)
-            formatted = f"{intro} {base}"
+            formatted = base
 
     if _needs_guidance(user_input):
-        formatted = formatted + "\n" + random.choice(_GUIDANCE_LINES)
+        guidance = _GUIDANCE_LINES[0]
+        formatted = f"{formatted}\n\n{guidance}" if formatted else guidance
 
     response = trim_response(formatted)
     return response
+
+

@@ -5,10 +5,13 @@ const typingIndicator = document.getElementById("typing-indicator");
 const emptyState = document.getElementById("empty-state");
 const welcomeMessage = document.getElementById("welcome");
 const STORAGE_KEY = "governor_user";
+const SESSION_KEY = "governor_session_id";
 
 let userProfile = null;
 let lastUserMessage = "";
 let responseCount = 0;
+let profileReady = false;
+let profileInitializationPromise = null;
 let onboardingStep = 0;
 let onboardingActive = false;
 let onboardingDraft = {
@@ -42,6 +45,92 @@ function normalizeText(text) {
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeProfile(profile) {
+  if (!profile || typeof profile !== "object") return null;
+
+  const normalized = {};
+
+  ["name", "department", "level"].forEach((key) => {
+    const value = String(profile[key] || "").trim();
+    if (value) {
+      normalized[key] = value;
+    }
+  });
+
+  if (Array.isArray(profile.notes)) {
+    const notes = profile.notes
+      .map((note) => String(note || "").trim())
+      .filter(Boolean);
+    if (notes.length) {
+      normalized.notes = notes;
+    }
+  } else if (typeof profile.notes === "string") {
+    const note = profile.notes.trim();
+    if (note) {
+      normalized.notes = [note];
+    }
+  }
+
+  return Object.keys(normalized).length ? normalized : null;
+}
+
+function isMemoryControlMessage(message) {
+  const normalized = normalizeText(message);
+  if (!normalized) return false;
+
+  const patterns = [
+    /^call me\s+/,
+    /^my name is\s+/,
+    /^i am in\s+.+\s+department$/,
+    /^i study\s+/,
+    /^i m now\s+\d{2,3}\s*level$/,
+    /^i am\s+\d{2,3}\s*level$/,
+    /^i'm now\s+\d{2,3}\s*level$/,
+    /^i m in\s+.+\s+department$/,
+    /^i m studying\s+/,
+    /^(change|update|set)\s+my\s+(name|department|level)\b/,
+    /^(what is my name|whats my name|what's my name|what is my department|whats my department|what's my department|what level am i|what level am i in|what do you know about me|who am i)\b/,
+    /^i prefer\s+/,
+    /^i stay in\s+/,
+    /^i stay at\s+/,
+    /^i live in\s+/,
+    /^i reside in\s+/,
+  ];
+
+  return patterns.some((pattern) => pattern.test(normalized));
+}
+
+function getSessionId() {
+  try {
+    const existing = localStorage.getItem(SESSION_KEY);
+    if (existing) return existing;
+
+    const generated =
+      (window.crypto && typeof window.crypto.randomUUID === "function")
+        ? window.crypto.randomUUID()
+        : `sid_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    localStorage.setItem(SESSION_KEY, generated);
+    return generated;
+  } catch (error) {
+    console.error("Failed to create session id:", error);
+    return `sid_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  }
+}
+
+async function clearServerProfile() {
+  try {
+    await fetch("/api/profile/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: getSessionId(),
+      }),
+    });
+  } catch (error) {
+    console.error("Failed to clear server profile:", error);
+  }
 }
 
 function isGreetingResponse(text) {
@@ -250,15 +339,7 @@ function safeReadProfile() {
     if (!raw) return null;
 
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return null;
-
-    const name = String(parsed.name || "").trim();
-    const department = String(parsed.department || "").trim();
-    const level = String(parsed.level || "").trim();
-
-    if (!name || !department || !level) return null;
-
-    return { name, department, level };
+    return normalizeProfile(parsed);
   } catch (error) {
     console.error("Failed to read profile:", error);
     return null;
@@ -267,7 +348,11 @@ function safeReadProfile() {
 
 function safeWriteProfile(profile) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
+    const normalized = normalizeProfile(profile);
+    if (!normalized) {
+      return;
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
   } catch (error) {
     console.error("Failed to save profile:", error);
   }
@@ -281,109 +366,80 @@ function safeClearProfile() {
   }
 }
 
+async function loadProfileFromServer() {
+  try {
+    const response = await fetch(`/api/profile?session_id=${encodeURIComponent(getSessionId())}`);
+    if (!response.ok) return null;
+
+    const data = await response.json();
+    return normalizeProfile(data.profile);
+  } catch (error) {
+    console.error("Failed to load server profile:", error);
+    return null;
+  }
+}
+
 function getActiveUserPayload() {
   if (userProfile) {
     return { ...userProfile };
   }
 
-  return {
-    name: onboardingDraft.name || "",
-    department: onboardingDraft.department || "",
-    level: onboardingDraft.level || "",
-  };
+  return {};
 }
 
 function setWelcomeMessage() {
   if (!welcomeMessage) return;
 
   if (userProfile) {
-    welcomeMessage.textContent = `Welcome back, ${userProfile.name}. How can I assist you today?`;
+    if (userProfile.name) {
+      welcomeMessage.textContent = `Welcome back, ${userProfile.name}. How can I assist you today?`;
+    } else {
+      welcomeMessage.textContent = "Welcome back. How can I assist you today?";
+    }
     return;
   }
 
-  welcomeMessage.textContent = `${getGreeting()} - let's personalize your experience.`;
-}
-
-function completeOnboarding() {
-  userProfile = {
-    name: onboardingDraft.name,
-    department: onboardingDraft.department,
-    level: onboardingDraft.level,
-  };
-
-  safeWriteProfile(userProfile);
-  onboardingActive = false;
-  onboardingStep = 0;
-  setWelcomeMessage();
-  addMessage(
-    "bot",
-    `Nice to meet you, ${userProfile.name}. I'll guide you better based on your ${userProfile.department} ${userProfile.level} level.`
-  );
-}
-
-function handleOnboardingAnswer(message) {
-  if (onboardingStep === 0) {
-    onboardingDraft.name = message;
-    onboardingStep = 1;
-    addMessage("bot", "What is your department?");
-    return;
-  }
-
-  if (onboardingStep === 1) {
-    onboardingDraft.department = message;
-    onboardingStep = 2;
-    addMessage("bot", "What is your level? (e.g., 100, 200, 300...)");
-    return;
-  }
-
-  onboardingDraft.level = message;
-  completeOnboarding();
-}
-
-function startOnboarding(reason = "initial") {
-  onboardingActive = true;
-  onboardingStep = 0;
-  onboardingDraft = {
-    name: "",
-    department: "",
-    level: "",
-  };
-
-  if (emptyState) {
-    emptyState.style.display = "none";
-  }
-
-  if (reason === "reset") {
-    addMessage("bot", "Profile cleared. Let's start over.");
-  }
-
-  addMessage("bot", "What should I call you?");
+  welcomeMessage.textContent = "Good morning - I'm Governor AI. How can I assist you today?";
 }
 
 function resetProfile() {
+  clearServerProfile();
   safeClearProfile();
   resetFeedbackCounter();
   userProfile = null;
-  onboardingActive = false;
-  onboardingStep = 0;
-  onboardingDraft = {
-    name: "",
-    department: "",
-    level: "",
-  };
   setWelcomeMessage();
-  startOnboarding("reset");
+  addMessage("bot", "Good morning - I'm Governor AI. How can I assist you today?");
 }
 
-userProfile = safeReadProfile();
-setWelcomeMessage();
+async function initializeProfileState() {
+  const localProfile = safeReadProfile();
+  const serverProfile = await loadProfileFromServer();
+  userProfile = normalizeProfile({
+    ...(localProfile || {}),
+    ...(serverProfile || {}),
+  });
 
-if (!userProfile) {
-  startOnboarding();
+  if (userProfile) {
+    safeWriteProfile(userProfile);
+  }
+
+  setWelcomeMessage();
+
+  if (!userProfile) {
+    addMessage("bot", "Good morning - I'm Governor AI. How can I assist you today?");
+  }
+
+  profileReady = true;
 }
+
+profileInitializationPromise = initializeProfileState();
 
 chatForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+
+  if (!profileReady && profileInitializationPromise) {
+    await profileInitializationPromise;
+  }
 
   const message = chatInput.value.trim();
   if (!message) return;
@@ -400,11 +456,6 @@ chatForm.addEventListener("submit", async (event) => {
     return;
   }
 
-  if (onboardingActive) {
-    handleOnboardingAnswer(message);
-    return;
-  }
-
   showTyping();
 
   try {
@@ -414,6 +465,7 @@ chatForm.addEventListener("submit", async (event) => {
       body: JSON.stringify({
         message,
         user: getActiveUserPayload(),
+        session_id: getSessionId(),
       }),
     });
 
@@ -438,6 +490,14 @@ chatForm.addEventListener("submit", async (event) => {
     const reply = (data.reply || "").trim() || fallback;
 
     console.log("Confidence:", data.confidence);
+
+    const returnedProfile = normalizeProfile(data.profile);
+    if (returnedProfile) {
+      userProfile = returnedProfile;
+      safeWriteProfile(userProfile);
+      setWelcomeMessage();
+    }
+
     addMessage("bot", reply, {
       feedbackCandidate: true,
       userMessage: message,
