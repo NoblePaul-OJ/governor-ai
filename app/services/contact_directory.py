@@ -1,10 +1,7 @@
-import json
 import re
-from pathlib import Path
 
+from app.services.directory import get_unit_contacts, load_directory
 
-DIRECTORY_PATH = Path(__file__).resolve().parents[2] / "contactDirectory.json"
-_DIRECTORY_CACHE = None
 
 CONTACT_INTENT_PHRASES = (
     "how do i contact",
@@ -20,49 +17,35 @@ CONTACT_INTENT_PHRASES = (
 
 OFFICE_KEYWORDS = {
     "Admissions Office": ["admission", "admissions", "screening", "clearance"],
-    "Bursary Office": ["bursary", "fees", "fee", "payment", "invoice", "tuition"],
+    "Bursary Unit": ["bursary", "fees", "fee", "payment", "invoice", "tuition", "receipt"],
     "Student Affairs Office": ["student affairs", "hostel", "accommodation", "welfare"],
     "Exams and Records Office": ["records", "result", "results", "transcript", "grade", "gpa"],
     "Academic Affairs Office": ["academic affairs", "course registration", "registration", "graduation"],
-    "ICT Support Unit": ["ict", "portal", "password", "login", "technical", "support"],
+    "ICT Support": ["ict", "portal", "password", "login", "technical", "support", "result", "registration"],
     "Vice Chancellor's Office": ["vice chancellor", "vc", "chancellor"],
     "Registrar's Office": ["registrar", "registry", "documentation", "policy"],
+}
+
+_UNIT_TO_SECTION = {
+    "ict": "ict",
+    "ict support": "ict",
+    "ict department": "ict",
+    "bursary": "bursary",
+    "bursary unit": "bursary",
+    "bursary office": "bursary",
+    "admissions": "admissions",
+    "admissions office": "admissions",
+    "student affairs": "student_affairs",
+    "vc": "vc",
+    "vice chancellor": "vc",
+    "registrar": "registrar",
+    "academic affairs": "academic_affairs",
 }
 
 
 def _normalize(text):
     cleaned = re.sub(r"[^a-zA-Z0-9\s]", " ", (text or "").lower())
     return " ".join(cleaned.split())
-
-
-def load_contact_directory():
-    global _DIRECTORY_CACHE
-    if _DIRECTORY_CACHE is not None:
-        return _DIRECTORY_CACHE
-
-    if not DIRECTORY_PATH.exists():
-        _DIRECTORY_CACHE = []
-        return _DIRECTORY_CACHE
-
-    with DIRECTORY_PATH.open("r", encoding="utf-8-sig") as handle:
-        data = json.load(handle)
-
-    cleaned = []
-    for row in data:
-        if not isinstance(row, dict):
-            continue
-        cleaned.append(
-            {
-                "office_name": str(row.get("office_name", "")).strip(),
-                "description": str(row.get("description", "")).strip(),
-                "email": str(row.get("email", "")).strip(),
-                "phone": str(row.get("phone", "")).strip(),
-                "location": str(row.get("location", "")).strip(),
-            }
-        )
-
-    _DIRECTORY_CACHE = [r for r in cleaned if r["office_name"]]
-    return _DIRECTORY_CACHE
 
 
 def _is_contact_query(question):
@@ -76,7 +59,7 @@ def _is_contact_query(question):
 
 def _office_match_score(question, entry):
     normalized = _normalize(question)
-    office_name = entry["office_name"]
+    office_name = entry.get("unit_name") or entry.get("office_name") or ""
     score = 0
 
     office_tokens = [tok for tok in _normalize(office_name).split() if tok not in {"office", "unit", "and", "s"}]
@@ -85,22 +68,76 @@ def _office_match_score(question, entry):
     keywords = OFFICE_KEYWORDS.get(office_name, [])
     score += sum(2 for kw in keywords if _normalize(kw) in normalized)
 
+    common_issues = entry.get("common_issues") or entry.get("common_issue_types") or []
+    if isinstance(common_issues, list):
+        score += sum(1 for issue in common_issues if _normalize(issue) in normalized)
+
+    handles = entry.get("handles") or []
+    if isinstance(handles, list):
+        score += sum(1 for issue in handles if _normalize(issue) in normalized)
+
     return score
 
 
+def _natural_join(items):
+    cleaned = [str(item).strip() for item in items if str(item).strip()]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    if len(cleaned) == 2:
+        return f"{cleaned[0]} and {cleaned[1]}"
+    return f"{', '.join(cleaned[:-1])}, and {cleaned[-1]}"
+
+
 def _format_contact(entry):
-    return (
-        f"Contact Details: {entry['office_name']}\n"
-        f"Description: {entry['description']}\n"
-        f"Email: {entry['email']}\n"
-        f"Phone: {entry['phone']}\n"
-        f"Location: {entry['location']}"
-    )
+    unit_name = entry.get("unit_name") or entry.get("office_name") or "University Office"
+    return f"{unit_name} is the right office for that."
 
 
 def _available_offices(entries):
-    names = [e["office_name"] for e in entries if e.get("office_name")]
-    return ", ".join(names)
+    names = [e.get("unit_name") or e.get("office_name") for e in entries if e.get("unit_name") or e.get("office_name")]
+    return _natural_join(names)
+
+
+def _iter_directory_entries():
+    directory = load_directory()
+    if not isinstance(directory, dict):
+        return []
+
+    entries = []
+    for key, value in directory.items():
+        if key == "hostels" and isinstance(value, dict):
+            for hostel_key, hostel_value in value.items():
+                if not isinstance(hostel_value, dict):
+                    continue
+                entries.append(
+                    {
+                        "unit_key": hostel_key,
+                        "unit_name": hostel_value.get("office_name") or hostel_key.replace("_", " ").title(),
+                        "office_name": hostel_value.get("office_name") or hostel_key.replace("_", " ").title(),
+                        "description": hostel_value.get("description") or hostel_value.get("note"),
+                        "phone": hostel_value.get("phone"),
+                        "whatsapp": hostel_value.get("whatsapp"),
+                        "email": hostel_value.get("email"),
+                        "office_location": hostel_value.get("office") or hostel_value.get("location"),
+                        "office_hours": hostel_value.get("office_hours"),
+                        "preferred_contact_method": hostel_value.get("preferred_contact_method"),
+                        "common_issues": hostel_value.get("common_issues") or hostel_value.get("common_issue_types") or [],
+                    }
+                )
+            continue
+
+        section_key = _UNIT_TO_SECTION.get(key, key)
+        contact = get_unit_contacts(section_key)
+        if contact:
+            entries.append(contact)
+
+    return entries
+
+
+def load_contact_directory():
+    return _iter_directory_entries()
 
 
 def resolve_contact_query(question):
@@ -124,6 +161,7 @@ def resolve_contact_query(question):
             "handled": True,
             "matched": True,
             "entry": best_entry,
+            "contact": best_entry,
             "reply": _format_contact(best_entry),
         }
 
@@ -133,7 +171,7 @@ def resolve_contact_query(question):
         "matched": False,
         "entry": None,
         "reply": (
-            "I can provide official contact details, but I need the office name.\n"
-            f"Available offices: {offices}"
+            "I can help with the official contact details, but I need the office name first. "
+            f"I can already point you to {offices}."
         ),
     }

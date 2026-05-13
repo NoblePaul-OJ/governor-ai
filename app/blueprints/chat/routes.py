@@ -10,7 +10,7 @@ from pathlib import Path
 from flask import Blueprint, current_app, jsonify, request
 
 from app.services.contact_directory import load_contact_directory, resolve_contact_query
-from app.services.directory import get_hostel, get_ict, get_student_affairs, get_vc_contact
+from app.services.directory import get_contact, get_hostel, get_unit_contacts
 from app.services.memory_extractor import detect_user_memory_message
 from app.services.knowledge_base import detect_hostel_context, find_relevant_entries, match_conversational
 from app.services.llm import call_llm_with_retry
@@ -27,6 +27,7 @@ from app.services.store import (
     get_user_memory,
     get_user_profile,
     get_user_value,
+    update_user,
     save_message,
     update_user_memory,
     set_user_profile,
@@ -35,7 +36,13 @@ from app.services.store import (
     clear_pending_field,
     update_conversation_state,
 )
-from app.services.response_formatter import format_response
+from app.services.response_formatter import (
+    build_incomplete_message_reply,
+    detect_incomplete_message,
+    detect_user_tone,
+    format_response,
+    polish_response_text,
+)
 from app.services.task_flow import process_task_message
 from app.services.task_requests_db import list_chat_logs
 
@@ -54,7 +61,7 @@ HOSTEL_REGISTRATION_NOTE = (
 HOSTEL_FALLBACK_INSTRUCTION = (
     "You are Governor AI for Godfrey Okoye University. The user is asking about hostel or accommodation. "
     "Give a clear, practical, student-friendly answer based on a Nigerian university system. Be direct and helpful. "
-    "Do not use symbols like *, #, or markdown bullet lists. Use short paragraphs with line breaks."
+    "Write as one or two natural paragraphs. Avoid markdown symbols, bullet lists, and repeated headings."
 )
 HOSTEL_REGISTRATION_CONTEXT_PHRASES = (
     "i have not registered",
@@ -95,6 +102,39 @@ ICT_CONTACT_PHRASES = (
     "technical support",
 )
 
+BURSARY_CONTACT_PHRASES = (
+    "bursary",
+    "fees office",
+    "payment office",
+    "school fees",
+    "tuition payment",
+)
+
+ADMISSIONS_CONTACT_PHRASES = (
+    "admissions",
+    "admission",
+    "admissions office",
+    "admission office",
+    "screening office",
+    "clearance office",
+)
+
+UNIT_INTROS = {
+    "vc": "The Vice Chancellor's Office handles formal correspondence and high-level administrative matters.",
+    "student_affairs": "Student Affairs handles student welfare, support, and general student concerns.",
+    "ict": "ICT Support handles portal login, registration, payment reflection, result checking, and technical support issues.",
+    "bursary": "The Bursary Unit handles school fees, payment complaints, receipt issues, clearance verification, and financial inquiries.",
+    "admissions": "Admissions handles admission inquiries, application issues, transfer inquiries, admission status, acceptance guidance, and prospective student support.",
+}
+
+UNIT_CONTACT_INTENTS = {
+    "vc": "vc_contact",
+    "student_affairs": "student_affairs_contact",
+    "ict": "ict_contact",
+    "bursary": "bursary_contact",
+    "admissions": "admissions_contact",
+}
+
 HOSTEL_CONTACT_ALIASES = {
     "sacred heart hostel": "sacred_heart",
     "ad gentes hostel": "ad_gentes",
@@ -106,14 +146,15 @@ HOSTEL_CONTACT_ALIASES = {
 
 GENERAL_CONTACT_PROMPT = (
     "You are Governor AI for Godfrey Okoye University. Suggest the appropriate office and include contact guidance. "
-    "If the user does not name a specific office, explain how to identify the right office and ask a short follow-up question. "
-    "Use clean paragraphs with line breaks and no bullets or markdown symbols."
+    "If the user does not name a specific office, explain how to identify the right office and ask one short follow-up question only if it is necessary. "
+    "Keep the response concise, natural, and unified. Mention each office only once and do not repeat labels like contact details, handles, or office fields."
 )
 
 FOLLOW_UP_STYLE_GUIDANCE = (
     "Do not ask multiple follow-up questions unnecessarily. "
     "Answer the user's current statement first. "
-    "Only ask ONE clarifying question if it is absolutely necessary. "
+    "Only ask one clarifying question if it is absolutely necessary. "
+    "If the message looks cut off, ask a calm completion question instead of guessing. "
     "Prefer direct guidance and a calm, professional tone. "
     "Keep the response concise unless more detail is genuinely needed. "
     "Make the response feel natural, not like a checklist."
@@ -122,12 +163,57 @@ FOLLOW_UP_STYLE_GUIDANCE = (
 HUMAN_RESPONSE_GUIDANCE = (
     "Respond naturally to the user's tone and intent. "
     "Use a calm, intelligent, professional style with slight warmth. "
-    "Avoid slang, childish phrasing, and playful filler. "
+    "Avoid slang, childish phrasing, playful filler, and over-excitement. "
+    "Do not sound chatty or dramatic. "
     "Do not repeat stored profile details unless they are directly relevant to the current question. "
+    "If the user profile is useful, mention it lightly in passing rather than restating it as a label. "
     "If the user changes topic, answer only the new topic and do not carry over the old explanation unless it is essential. "
-    "Use short paragraphs or simple numbered steps. "
+    "Use short paragraphs or simple numbered steps only when the user is asking for a procedure or workflow. "
     "Only introduce university-specific guidance when it becomes necessary."
 )
+
+
+def _tone_guidance(question):
+    tone = detect_user_tone(question)
+    tone_map = {
+        "casual": "The user sounds casual. Keep the reply natural, but still calm and professional.",
+        "serious": "The user sounds serious. Keep the reply direct, concise, and formal.",
+        "stressed": "The user sounds stressed or confused. Keep the reply clear, steady, and supportive.",
+        "neutral": "Use a calm, professional tone with slight warmth.",
+    }
+    return f"Tone guidance:\n{tone_map.get(tone, tone_map['neutral'])}"
+
+
+def _build_greeting(profile):
+    profile = _normalize_user_context(profile)
+    name = str(profile.get("name") or "").strip()
+    department = str(profile.get("department") or "").strip()
+    level = str(profile.get("level") or "").strip()
+
+    if name:
+        return f"Welcome back, {name}. I'm Governor AI. Tell me what you need and I'll help from there."
+
+    if department and level:
+        return f"Welcome back. I remember you are a {level} level {department} student. I'm Governor AI. Tell me what you need and I'll help from there."
+
+    if department:
+        return f"Welcome back. I remember your {department} department details. I'm Governor AI. Tell me what you need and I'll help from there."
+
+    if level:
+        return f"Welcome back. I remember you are a {level} level student. I'm Governor AI. Tell me what you need and I'll help from there."
+
+    if profile:
+        return "Welcome back. I'm Governor AI. Tell me what you need and I'll help from there."
+
+    hour = datetime.now().hour
+    if hour < 12:
+        salutation = "Good morning"
+    elif hour < 18:
+        salutation = "Good afternoon"
+    else:
+        salutation = "Good evening"
+
+    return f"{salutation}. I'm Governor AI. Tell me what you need and I'll help from there."
 
 
 def _feedback_file_path():
@@ -577,6 +663,9 @@ def detect_memory_recall(message):
 
 
 def _looks_like_pending_value(message):
+    if detect_incomplete_message(message):
+        return False
+
     normalized = _normalize_text(message)
     if not normalized:
         return False
@@ -626,6 +715,31 @@ def _build_profile_payload(payload, profile=None):
 def _handle_memory_control(question, session_id, profile, task_active=False):
     pending_field = get_pending_field(session_id)
     memory_event = detect_user_memory_message(question)
+
+    if pending_field and detect_incomplete_message(question):
+        response = "Looks like your message got cut off — what would you like me to change it to?"
+        log_entry = add_log(
+            question=question,
+            intent=f"memory_change_{pending_field}",
+            response=response,
+            confidence=1.0,
+            status="answered",
+            workflow_type=None,
+            is_fallback=False,
+            is_timeout=False,
+        )
+        return {
+            "reply": response,
+            "intent": f"memory_change_{pending_field}",
+            "category": "memory",
+            "confidence": 1.0,
+            "source": "memory_control",
+            "matched_question": None,
+            "fallback": False,
+            "contact_suggestion": None,
+            "log_id": log_entry["id"],
+            "profile": _normalize_user_context(profile),
+        }
 
     if memory_event:
         action = memory_event.get("action")
@@ -680,6 +794,34 @@ def _handle_memory_control(question, session_id, profile, task_active=False):
                 "contact_suggestion": None,
                 "log_id": log_entry["id"],
                 "profile": _normalize_user_context(profile),
+            }
+
+        if action == "clear_name":
+            update_user(session_id, "name", None)
+            clear_pending_field(session_id)
+            updated_profile = get_user_memory(session_id)
+            response = "Alright, I'll stop using that."
+            log_entry = add_log(
+                question=question,
+                intent="memory_clear_name",
+                response=response,
+                confidence=1.0,
+                status="answered",
+                workflow_type=None,
+                is_fallback=False,
+                is_timeout=False,
+            )
+            return {
+                "reply": response,
+                "intent": "memory_clear_name",
+                "category": "memory",
+                "confidence": 1.0,
+                "source": "memory_control",
+                "matched_question": None,
+                "fallback": False,
+                "contact_suggestion": None,
+                "log_id": log_entry["id"],
+                "profile": updated_profile,
             }
 
         if action == "update":
@@ -778,22 +920,27 @@ def _handle_memory_control(question, session_id, profile, task_active=False):
 def _render_user_context(user):
     user = _normalize_user_context(user)
     if not user:
-        return "Name: Unknown\nDepartment: Unknown\nLevel: Unknown"
+        return "No student profile is stored yet."
 
-    name = user.get("name") or "Unknown"
-    department = user.get("department") or "Unknown"
-    level = user.get("level") or "Unknown"
+    parts = []
+    name = user.get("name")
+    department = user.get("department")
+    level = user.get("level")
     notes = user.get("notes")
-    note_text = ""
-    if isinstance(notes, list) and notes:
-        note_text = f"\nNotes: {notes[-1]}"
 
-    return (
-        f"Name: {name}\n"
-        f"Department: {department}\n"
-        f"Level: {level}"
-        f"{note_text}"
-    )
+    if name:
+        parts.append(f"name: {name}")
+    if department:
+        parts.append(f"department: {department}")
+    if level:
+        parts.append(f"level: {level}")
+    if isinstance(notes, list) and notes:
+        parts.append(f"note: {notes[-1]}")
+
+    if not parts:
+        return "No student profile is stored yet."
+
+    return "Known profile details: " + "; ".join(parts)
 
 
 def _render_user_followup_guidance(user):
@@ -866,6 +1013,9 @@ def _build_intelligent_fallback_message(question, user=None, context_messages=No
     context_messages = context_messages or []
     kb_entries = kb_entries or []
 
+    if detect_incomplete_message(question):
+        return build_incomplete_message_reply()
+
     if not normalized:
         return _build_personalized_fallback_message(user)
 
@@ -928,11 +1078,11 @@ def _clean_hostel_response(text):
         lines.append(line)
 
     cleaned = "\n".join(lines).strip()
-    return cleaned or str(text or "").strip()
+    return polish_response_text(cleaned or str(text or "").strip())
 
 
 def _clean_contact_response(text):
-    return _clean_hostel_response(text)
+    return polish_response_text(_clean_hostel_response(text))
 
 
 def _hostel_response_note(context_messages):
@@ -960,6 +1110,64 @@ def _has_known_office_reference(question):
     return False
 
 
+def _clean_contact_value(value):
+    text = str(value or "").strip()
+    return text if text and text.lower() not in {"not available yet", "unavailable yet"} else ""
+
+
+def _clean_contact_list(value):
+    if not isinstance(value, list):
+        value = [value] if value not in (None, "") else []
+
+    items = []
+    for item in value:
+        text = _clean_contact_value(item)
+        if text and text not in items:
+            items.append(text)
+    return items
+
+
+def _contact_summary(contact):
+    issues = _clean_contact_list(
+        contact.get("common_issues") or contact.get("common_issue_types") or contact.get("handles")
+    )
+    if issues:
+        sample = issues[:4]
+        if len(sample) == 1:
+            return f"Supports {sample[0]}."
+        if len(sample) == 2:
+            return f"Supports {sample[0]} and {sample[1]}."
+        return f"Supports {', '.join(sample[:-1])}, and {sample[-1]}."
+
+    note = _clean_contact_value(contact.get("description") or contact.get("note"))
+    if note:
+        return note if note.endswith(".") else f"{note}."
+
+    return ""
+
+
+def _format_unit_contact_reply(unit_key, intro=None):
+    contact = get_unit_contacts(unit_key)
+    if not contact:
+        return None
+
+    unit_name = contact.get("unit_name") or UNIT_INTROS.get(unit_key, unit_key.replace("_", " ").title())
+    reply = f"{unit_name} is the right office for that."
+
+    return {
+        "handled": True,
+        "source": "directory_contact",
+        "intent": UNIT_CONTACT_INTENTS.get(unit_key, f"{unit_key}_contact"),
+        "category": "contact_directory",
+        "reply": reply,
+        "confidence": 1.0,
+        "matched_question": None,
+        "fallback": False,
+        "use_llm": False,
+        "contact": contact,
+    }
+
+
 def _detect_hostel_key(normalized_text):
     for alias, key in HOSTEL_CONTACT_ALIASES.items():
         if alias in normalized_text:
@@ -971,29 +1179,38 @@ def _build_contact_prompt(question, context_messages, user=None):
     context_text = _render_context(context_messages)
     user_text = _render_user_context(user)
     user_guidance = _render_user_followup_guidance(user)
-    directory_snapshot = "\n".join(
-        [
-            "VC contact",
-            f"Email: {get_vc_contact().get('email', 'Not available yet')}",
-            f"Office: {get_vc_contact().get('office', 'Not available yet')}",
-            f"Note: {get_vc_contact().get('note', '')}",
-            "",
-            "Student Affairs contact",
-            f"Phone: {get_student_affairs().get('phone', 'Not available yet')}",
-            f"Office: {get_student_affairs().get('office', 'Not available yet')}",
-            f"Note: {get_student_affairs().get('note', '')}",
-            "",
-            "ICT contact",
-            f"Phone: {get_ict().get('phone', 'Not available yet')}",
-            f"Office: {get_ict().get('office', 'Not available yet')}",
-            f"Note: {get_ict().get('note', '')}",
-        ]
-    )
+    contact_sections = []
+    for unit_key in ("vc", "student_affairs", "ict", "bursary", "admissions"):
+        contact = get_contact(unit_key)
+        if not contact:
+            continue
+        section_lines = [contact.get("unit_name") or unit_key.replace("_", " ").title()]
+        phone_values = _clean_contact_list(contact.get("phones") or contact.get("phone"))
+        for phone in phone_values:
+            section_lines.append(f"Phone: {phone}")
+        for email in _clean_contact_list(contact.get("emails") or contact.get("email")):
+            section_lines.append(f"Email: {email}")
+        whatsapp = _clean_contact_value(contact.get("whatsapp"))
+        if whatsapp and whatsapp not in phone_values:
+            section_lines.append(f"WhatsApp: {whatsapp}")
+        office = _clean_contact_value(contact.get("office_location") or contact.get("office"))
+        if office:
+            section_lines.append(f"Office: {office}")
+        office_hours = _clean_contact_value(contact.get("office_hours"))
+        if office_hours:
+            section_lines.append(f"Office hours: {office_hours}")
+        summary = _contact_summary(contact)
+        if summary:
+            section_lines.append(f"Summary: {summary}")
+        contact_sections.append("\n".join(section_lines))
+
+    directory_snapshot = "\n\n".join(contact_sections)
 
     return (
         f"{GENERAL_CONTACT_PROMPT}\n\n"
         f"{FOLLOW_UP_STYLE_GUIDANCE}\n\n"
         f"{HUMAN_RESPONSE_GUIDANCE}\n\n"
+        f"{_tone_guidance(question)}\n\n"
         "User context:\n"
         f"{user_text}\n\n"
         "Follow-up guidance:\n"
@@ -1003,7 +1220,12 @@ def _build_contact_prompt(question, context_messages, user=None):
         "Conversation so far:\n"
         f"{context_text}\n\n"
         "Available directory details:\n"
-        f"{directory_snapshot}"
+        f"{directory_snapshot}\n\n"
+        "How to respond:\n"
+        "1. Write one smooth paragraph first.\n"
+        "2. Mention the contact details only once and avoid repeating labels like contact details, handles, or office fields.\n"
+        "3. If the user did not name a specific office, ask only one short clarifying question.\n"
+        "4. Keep the tone calm, intelligent, and professional."
     )
 
 
@@ -1013,101 +1235,54 @@ def _handle_directory_contact(question, context_messages, user=None):
         return {"handled": False}
 
     if _contains_any(normalized, VC_CONTACT_PHRASES):
-        vc = get_vc_contact()
-        email = vc.get("email") or "Not available yet"
-        office = vc.get("office") or "Not available yet"
-        note = vc.get("note") or ""
-        lines = [
-            "If you want to reach the Vice Chancellor of Godfrey Okoye University, here is the direct option.",
-            "",
-            f"You can send an email to: {email}",
-            f"Office: {office}",
-            "",
-            "For physical visits, go to the VC's office through the secretary.",
-        ]
-        if note:
-            lines.extend(["", note])
-        return {
-            "handled": True,
-            "source": "directory_contact",
-            "intent": "vc_contact",
-            "category": "contact_directory",
-            "reply": "\n".join(lines),
-            "confidence": 1.0,
-            "matched_question": None,
-            "fallback": False,
-            "use_llm": False,
-        }
+        result = _format_unit_contact_reply("vc")
+        if result:
+            return result
 
     if _contains_any(normalized, STUDENT_AFFAIRS_CONTACT_PHRASES):
-        info = get_student_affairs()
-        phone = info.get("phone") or "Not available yet"
-        office = info.get("office") or "Not available yet"
-        note = info.get("note") or "They handle complaints, welfare, and student support."
-        lines = [
-            "For student-related issues, you should contact Student Affairs.",
-            "",
-            f"Phone: {phone}",
-            f"Office: {office}",
-            "",
-            note,
-        ]
-        return {
-            "handled": True,
-            "source": "directory_contact",
-            "intent": "student_affairs_contact",
-            "category": "contact_directory",
-            "reply": "\n".join(lines),
-            "confidence": 1.0,
-            "matched_question": None,
-            "fallback": False,
-            "use_llm": False,
-        }
+        result = _format_unit_contact_reply("student_affairs")
+        if result:
+            return result
 
     if _contains_any(normalized, ICT_CONTACT_PHRASES):
-        info = get_ict()
-        phone = info.get("phone") or "Not available yet"
-        office = info.get("office") or "Not available yet"
-        note = info.get("note") or "They handle portal issues, login problems, and technical support."
-        lines = [
-            "For portal or technical issues, contact ICT support.",
-            "",
-            f"Phone: {phone}",
-            f"Office: {office}",
-            "",
-            note,
-        ]
-        return {
-            "handled": True,
-            "source": "directory_contact",
-            "intent": "ict_contact",
-            "category": "contact_directory",
-            "reply": "\n".join(lines),
-            "confidence": 1.0,
-            "matched_question": None,
-            "fallback": False,
-            "use_llm": False,
-        }
+        result = _format_unit_contact_reply("ict")
+        if result:
+            return result
+
+    if _contains_any(normalized, BURSARY_CONTACT_PHRASES):
+        result = _format_unit_contact_reply("bursary")
+        if result:
+            return result
+
+    if _contains_any(normalized, ADMISSIONS_CONTACT_PHRASES):
+        result = _format_unit_contact_reply("admissions")
+        if result:
+            return result
 
     hostel_key = _detect_hostel_key(normalized)
     if hostel_key:
         info = get_hostel(hostel_key)
-        office = info.get("office") or "Not available yet"
-        phone = info.get("phone") or "Not available yet"
-        hostel_name = hostel_key.replace("_", " ").title()
-        lines = [
-            "Here is the information for your hostel.",
-            "",
-            f"Hostel: {hostel_name}",
-            f"Office: {office}",
-            f"Phone: {phone}",
-        ]
+        hostel_name = f"{hostel_key.replace('_', ' ').title()} Hostel"
+        office = _clean_contact_value(info.get("office"))
+        phone = _clean_contact_value(info.get("phone"))
+        details = []
+        if office and office.lower() not in {"not available yet", "unavailable yet"}:
+            details.append(f"the office is {office}")
+        if phone and phone.lower() not in {"not available yet", "unavailable yet"}:
+            details.append(f"the phone number is {phone}")
+
+        if details:
+            detail_text = " and ".join(details)
+            reply = f"I found {hostel_name}. For now, {detail_text}."
+        else:
+            reply = f"I found {hostel_name}, but the contact details are still being updated."
+
         return {
             "handled": True,
             "source": "directory_contact",
             "intent": f"{hostel_key}_contact",
             "category": "contact_directory",
-            "reply": "\n".join(lines),
+            "reply": reply,
             "confidence": 1.0,
             "matched_question": None,
             "fallback": False,
@@ -1125,17 +1300,12 @@ def _handle_directory_contact(question, context_messages, user=None):
         "accommodation help",
     )
     if _contains_any(normalized, hostel_contact_signals):
-        lines = [
-            "If you need hostel assistance, go to the hostel office closest to your accommodation.",
-            "",
-            "If you tell me your hostel name, I can give more specific guidance.",
-        ]
         return {
             "handled": True,
             "source": "directory_contact",
             "intent": "hostel_contact",
             "category": "contact_directory",
-            "reply": "\n".join(lines),
+            "reply": "If you need hostel assistance, go to the hostel office closest to your accommodation. If you tell me your hostel name, I can narrow it down.",
             "confidence": 0.9,
             "matched_question": None,
             "fallback": False,
@@ -1191,6 +1361,7 @@ def _build_prompt(question, context_messages, kb_entries, extra_instructions=Non
         f"{user_text}\n\n"
         f"{FOLLOW_UP_STYLE_GUIDANCE}\n\n"
         f"{HUMAN_RESPONSE_GUIDANCE}\n\n"
+        f"{_tone_guidance(question)}\n\n"
         "Follow-up guidance:\n"
         f"{user_guidance}\n\n"
         "Current user message:\n"
@@ -1207,8 +1378,10 @@ def _build_prompt(question, context_messages, kb_entries, extra_instructions=Non
         "4. Only ask for missing personal information if it is absolutely necessary to answer the user's question.\n"
         "5. If the user changes topic, answer only the new topic and do not carry over the previous explanation unless essential.\n"
         "6. Keep the response concise by default and expand only when needed.\n"
-        "7. Use short paragraphs or simple numbered steps. Avoid markdown symbols like *, #, or heavy bullet formatting.\n"
-        "8. Do not start with filler like 'here's a quick answer' or similar phrases."
+        "7. Use short paragraphs by default. Use numbered steps only when the user is asking for a process or workflow. Avoid markdown symbols like *, #, or heavy bullet formatting.\n"
+        "8. Do not start with filler like 'here's a quick answer' or similar phrases.\n"
+        "9. If the message looks cut off, ask a calm clarification instead of guessing.\n"
+        "10. Stay calm, intelligent, professional, and slightly warm. Never sound playful or childish."
     )
 
 
@@ -1321,6 +1494,34 @@ def chat_api():
             }
         )
 
+    if detect_incomplete_message(question):
+        response = build_incomplete_message_reply()
+        response = _finalize_response(response, question, category="conversation_clarity", profile=profile)
+        response = _commit_assistant_response(session_id, response, history_before, question=question, avoid_repeat=False)
+        log_entry = add_log(
+            question=question,
+            intent="message_cut_off",
+            response=response,
+            confidence=0.95,
+            status="clarification",
+            workflow_type=None,
+            is_fallback=False,
+            is_timeout=False,
+        )
+        return jsonify(
+            {
+                "reply": response,
+                "intent": "message_cut_off",
+                "category": "conversation_clarity",
+                "confidence": 0.95,
+                "source": "clarification",
+                "matched_question": None,
+                "fallback": False,
+                "contact_suggestion": None,
+                "log_id": log_entry["id"],
+            }
+        )
+
     directory_result = _handle_directory_contact(question, context_messages, user=user)
     if directory_result.get("handled"):
         if directory_result.get("use_llm"):
@@ -1359,6 +1560,7 @@ def chat_api():
                     "fallback": response == SMART_FALLBACK_MESSAGE,
                     "contact_suggestion": None,
                     "log_id": log_entry["id"],
+                    "contact": directory_result.get("contact"),
                 }
             )
 
@@ -1389,6 +1591,7 @@ def chat_api():
                 "fallback": False,
                 "contact_suggestion": None,
                 "log_id": log_entry["id"],
+                "contact": directory_result.get("contact"),
             }
         )
 
@@ -1622,6 +1825,7 @@ def profile_get_api():
         {
             "profile": _normalize_user_context(profile),
             "pending_field": pending_field,
+            "greeting": _build_greeting(profile),
         }
     )
 

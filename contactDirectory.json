@@ -7,10 +7,19 @@
     "location": "Administrative Building, Ground Floor"
   },
   {
-    "office_name": "Bursary Office",
+    "office_name": "Bursary Unit",
     "description": "Supports tuition payments, invoices, receipts, and fee-related guidance.",
-    "email": "bursary@gouni.edu.ng",
-    "phone": "+234-900-000-1002",
+    "email": "Unavailable yet",
+    "phone": "Unavailable yet",
+    "office_hours": "Unavailable yet",
+    "preferred_contact_method": "Unavailable yet",
+    "common_issue_types": [
+      "payment not reflecting",
+      "school fees complaints",
+      "receipt problems",
+      "clearance/payment verification",
+      "balance inquiries"
+    ],
     "location": "Administrative Building, Finance Wing"
   },
   {
@@ -35,10 +44,19 @@
     "location": "Senate Building, Academic Registry"
   },
   {
-    "office_name": "ICT Support Unit",
+    "office_name": "ICT Support",
     "description": "Provides support for portal access, account issues, and technical troubleshooting.",
-    "email": "ictsupport@gouni.edu.ng",
-    "phone": "+234-900-000-1006",
+    "email": "ict@gouni.edu.ng",
+    "phone": "09134273215",
+    "office_hours": "8am - 4pm",
+    "preferred_contact_method": "email/phone/WhatsApp",
+    "common_issue_types": [
+      "portal login",
+      "registration issues",
+      "payment reflection issues",
+      "result checking issues",
+      "portal errors"
+    ],
     "location": "ICT Centre, Main Campus"
   },
   {

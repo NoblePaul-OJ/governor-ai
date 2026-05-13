@@ -10,7 +10,9 @@ _SYSTEM_PROMPT = (
     "Always respond naturally like a human assistant. "
     "If the query is unrelated, respond conversationally but gently guide back to university context when appropriate. "
     "Use clean plain text only. Avoid markdown symbols such as *, #, -, or backticks. "
-    "Use short paragraphs with natural spacing."
+    "Use short paragraphs with natural spacing. "
+    "Do not repeat the same idea in separate headers or fragments. "
+    "If the user's message looks cut off, ask one calm clarifying question instead of guessing."
 )
 
 LLM_FALLBACK_MESSAGE = (

@@ -1,0 +1,24 @@
+[
+  {
+    "id": 1,
+    "task_key": "vc_appointment",
+    "task_label": "VC Appointment",
+    "output_type": "appointment_letter",
+    "payload": {
+      "confirmed": true,
+      "department": "22",
+      "letter": "",
+      "matric": "GOU",
+      "name": "John Doe",
+      "preferred_time": "tomorrow morning",
+      "reason": "I need clarification on my academic status",
+      "summary": "Step 6\nVC appointment summary\n\nName: John Doe\nMatric: GOU\nDepartment: 22\nReason: I need clarification on my academic status\nUrgency: urgent\nPreferred time: tomorrow morning\n\nPlease confirm if I should generate the formal appointment letter.\nReply yes to confirm or no to review the details again.",
+      "urgency": "urgent"
+    },
+    "user_message": "I want hostel booking",
+    "intent": "vc_appointment",
+    "timestamp": "2026-05-13T12:10:09+00:00",
+    "created_at": "2026-05-13T12:10:09+00:00",
+    "status": "pending"
+  }
+]

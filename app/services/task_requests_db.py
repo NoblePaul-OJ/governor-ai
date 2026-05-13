@@ -17,6 +17,14 @@ def _resolve_db_path(raw_path):
     return Path(__file__).resolve().parents[2] / path
 
 
+def _task_requests_json_path():
+    if has_app_context():
+        raw_path = current_app.config.get("TASK_REQUESTS_JSON_PATH", "app/data/task_requests_db.json")
+    else:
+        raw_path = "app/data/task_requests_db.json"
+    return _resolve_db_path(raw_path)
+
+
 def _connect(db_path):
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return sqlite3.connect(db_path)
@@ -58,6 +66,27 @@ def _create_chat_log_table(conn):
     )
 
 
+def _read_json_file(path, default):
+    if not path.exists():
+        return default
+
+    try:
+        with path.open("r", encoding="utf-8-sig") as handle:
+            data = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return default
+
+    return data
+
+
+def _write_json_file(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with tmp_path.open("w", encoding="utf-8") as handle:
+        json.dump(data, handle, ensure_ascii=False, indent=2)
+    tmp_path.replace(path)
+
+
 def initialize_task_db(app):
     if not _db_enabled(app.config):
         return
@@ -78,7 +107,7 @@ def initialize_query_log_db(app):
         conn.commit()
 
 
-def save_task_request(task_key, task_label, output_type, payload):
+def save_task_request(task_key, task_label, output_type, payload, status="pending", user_message=None, intent=None):
     if not _db_enabled(current_app.config):
         return None
 
@@ -96,7 +125,40 @@ def save_task_request(task_key, task_label, output_type, payload):
             (task_key, task_label, output_type, payload_json, created_at),
         )
         conn.commit()
-        return int(cursor.lastrowid)
+        request_id = int(cursor.lastrowid)
+
+    json_path = _task_requests_json_path()
+    records = _read_json_file(json_path, [])
+    if not isinstance(records, list):
+        records = []
+
+    record = {
+        "id": request_id,
+        "task_key": task_key,
+        "task_label": task_label,
+        "output_type": output_type,
+        "payload": payload,
+        "user_message": str(user_message or "").strip(),
+        "intent": str(intent or task_key or "").strip(),
+        "timestamp": created_at,
+        "created_at": created_at,
+        "status": str(status or "pending").strip() or "pending",
+    }
+
+    updated = False
+    for index, existing in enumerate(records):
+        if str(existing.get("id")) == str(request_id):
+            merged = dict(existing)
+            merged.update(record)
+            records[index] = merged
+            updated = True
+            break
+
+    if not updated:
+        records.append(record)
+
+    _write_json_file(json_path, records)
+    return request_id
 
 
 def _query_log_db_enabled():

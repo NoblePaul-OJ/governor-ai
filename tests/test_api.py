@@ -2,6 +2,7 @@ import json
 import sqlite3
 
 from app import create_app
+from app.services.directory import get_contact
 from app.services.store import QUERY_LOGS, reset_conversation_state
 
 
@@ -336,18 +337,115 @@ def test_contact_directory_lookup(monkeypatch):
         lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("LLM should not be called")),
     )
 
-    resp = client.post("/api/chat", json={"message": "How do I contact the bursary office?"})
+    resp = client.post("/api/chat", json={"message": "How do I contact the bursary unit?"})
     assert resp.status_code == 200
     data = resp.get_json()
 
-    assert data["source"] == "contact_directory"
+    assert data["source"] == "directory_contact"
     assert data["category"] == "contact_directory"
-    assert data["intent"] == "Bursary Office"
-    assert "Contact Details: Bursary Office" in data["reply"]
-    assert "Email:" in data["reply"]
-    assert "Phone:" in data["reply"]
-    assert "Location:" in data["reply"]
-    assert data["contact"]["office_name"] == "Bursary Office"
+    assert data["intent"] == "bursary_contact"
+    assert "Bursary Unit is the right office" in data["reply"]
+    assert "contact details below" not in data["reply"].lower()
+    assert data["contact"]["office_name"] == "Bursary Unit"
+    assert data["contact"]["phone"] == "08067160418"
+    assert data["contact"]["email"] == "info@gouni.edu.ng"
+    assert data["contact"]["phones"] == ["08067160418", "08068084455", "08068820118"]
+    assert data["contact"]["emails"] == ["info@gouni.edu.ng"]
+    assert data["contact"]["office_location"] == "Bursary Unit, Main Campus"
+    assert data["contact"]["common_issues"]
+
+
+def test_profile_greeting_api(monkeypatch):
+    app = create_app()
+    client = app.test_client()
+    QUERY_LOGS.clear()
+    reset_conversation_state()
+
+    session_id = "profile-greeting-session"
+
+    resp = client.post(
+        "/api/chat",
+        json={
+            "message": "my name is Ada Lovelace",
+            "session_id": session_id,
+        },
+    )
+    assert resp.status_code == 200
+
+    resp = client.get(f"/api/profile?session_id={session_id}")
+    assert resp.status_code == 200
+    data = resp.get_json()
+
+    assert data["profile"]["name"] == "Ada Lovelace"
+    assert data["greeting"].startswith("Welcome back, Ada Lovelace")
+
+
+def test_ict_contact_email_is_preserved():
+    contact = get_contact("ict")
+
+    assert contact["email"] == "ict@gouni.edu.ng"
+    assert "gmail.com" not in contact["email"]
+
+
+def test_ict_and_bursary_issue_workflows(monkeypatch):
+    app = create_app()
+    client = app.test_client()
+    QUERY_LOGS.clear()
+    reset_conversation_state()
+
+    from app.blueprints.chat import routes as chat_routes
+
+    monkeypatch.setattr(
+        chat_routes,
+        "call_llm_with_retry",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("LLM should not be called")),
+    )
+
+    ict_sequence = [
+        "My portal is not opening",
+        "Invalid session",
+        "Today morning",
+        "I tried Chrome and my phone",
+        "continue",
+    ]
+    ict_final = None
+    for message in ict_sequence:
+        resp = client.post("/api/chat", json={"message": message})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        ict_final = data
+
+    assert ict_final is not None
+    assert ict_final["source"] == "task_flow"
+    assert ict_final["intent"] == "ict_complaint"
+    assert "Official request draft" in ict_final["reply"]
+    assert "ICT Support" in ict_final["reply"]
+    assert "Phone:" in ict_final["reply"]
+    assert "Email:" in ict_final["reply"]
+
+    reset_conversation_state()
+
+    bursary_sequence = [
+        "My school fees have not reflected",
+        "10 May 2026",
+        "Bank transfer",
+        "Yes, I have the receipt",
+        "continue",
+    ]
+    bursary_final = None
+    for message in bursary_sequence:
+        resp = client.post("/api/chat", json={"message": message})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        bursary_final = data
+
+    assert bursary_final is not None
+    assert bursary_final["source"] == "task_flow"
+    assert bursary_final["intent"] == "bursary_payment_complaint"
+    assert "Official request draft" in bursary_final["reply"]
+    assert "Bursary Unit" in bursary_final["reply"]
+    assert "Phone:" in bursary_final["reply"]
+    assert "Email:" in bursary_final["reply"]
 
 
 def test_contact_directory_unknown_office(monkeypatch):
@@ -398,29 +496,47 @@ def test_new_contact_directory_system(monkeypatch):
             "contact VC",
             "directory_contact",
             "vc_contact",
-            "christiananieke2@gmail.com",
+            "Vice Chancellor",
+            "email",
         ),
         (
             "I need student affairs contact",
             "directory_contact",
             "student_affairs_contact",
-            "08166915454",
+            "Student Affairs",
+            "phone",
+        ),
+        (
+            "bursary contact",
+            "directory_contact",
+            "bursary_contact",
+            "Bursary Unit",
+            "phones",
+        ),
+        (
+            "I need admissions",
+            "directory_contact",
+            "admissions_contact",
+            "Admissions Office",
+            "phones",
         ),
         (
             "portal issue ICT",
-            "directory_contact",
-            "ict_contact",
-            "technical support",
+            "task_flow",
+            "ict_complaint",
+            "error message",
+            None,
         ),
         (
             "contact Sacred Heart hostel",
             "directory_contact",
             "sacred_heart_contact",
-            "Hostel: Sacred Heart",
+            "Sacred Heart Hostel",
+            "office_location",
         ),
     ]
 
-    for message, expected_source, expected_intent, expected_text in cases:
+    for message, expected_source, expected_intent, expected_text, field_name in cases:
         reset_conversation_state()
         resp = client.post("/api/chat", json={"message": message})
         assert resp.status_code == 200
@@ -428,6 +544,9 @@ def test_new_contact_directory_system(monkeypatch):
         assert data["source"] == expected_source
         assert data["intent"] == expected_intent
         assert expected_text in data["reply"]
+        if expected_intent in {"vc_contact", "student_affairs_contact", "ict_contact", "bursary_contact", "admissions_contact"}:
+            assert data["contact"] is not None
+            assert data["contact"][field_name] is not None
         assert "*" not in data["reply"]
         assert "#" not in data["reply"]
 
@@ -483,6 +602,16 @@ def test_memory_updates_overwrite_recall_and_persist(monkeypatch, tmp_path):
     assert data["profile"]["name"] == "Grace Hopper"
     assert "remember" in data["reply"].lower()
 
+    resp = client.post(
+        "/api/chat",
+        json={"message": "does Noble have a girlfriend", "session_id": session_id},
+    )
+    assert resp.status_code == 200
+    resp = client.get("/api/profile", query_string={"session_id": session_id})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["profile"]["name"] == "Grace Hopper"
+
     resp = client.post("/api/chat", json={"message": "what is my name", "session_id": session_id})
     assert resp.status_code == 200
     data = resp.get_json()
@@ -493,13 +622,19 @@ def test_memory_updates_overwrite_recall_and_persist(monkeypatch, tmp_path):
     data = resp.get_json()
     assert data["reply"] == "What would you like me to change it to?"
 
+    resp = client.post("/api/chat", json={"message": "stop calling me", "session_id": session_id})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["reply"] == "Alright, I'll stop using that."
+    assert data["profile"].get("name") is None
+
     resp = client.get("/api/profile", query_string={"session_id": session_id})
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["profile"]["name"] == "Grace Hopper"
+    assert data["profile"].get("name") is None
     assert data["profile"]["department"] == "Computer Science"
     assert data["profile"]["level"] == "400"
-    assert data["pending_field"] == "name"
+    assert data["pending_field"] is None
 
     with sqlite3.connect(store_module.STORE_DB_PATH) as conn:
         row = conn.execute(
@@ -513,17 +648,25 @@ def test_memory_updates_overwrite_recall_and_persist(monkeypatch, tmp_path):
     fresh_resp = fresh_client.get("/api/profile", query_string={"session_id": session_id})
     assert fresh_resp.status_code == 200
     fresh_data = fresh_resp.get_json()
-    assert fresh_data["profile"]["name"] == "Grace Hopper"
+    assert fresh_data["profile"].get("name") is None
     assert fresh_data["profile"]["department"] == "Computer Science"
     assert fresh_data["profile"]["level"] == "400"
 
 
 def test_memory_extractor_patterns():
     from app.services.memory_extractor import detect_user_memory_message
+    from app.services.memory_extractor import clean_name
 
     name_update = detect_user_memory_message("call me Nobcyborg")
     assert name_update["action"] == "update"
     assert name_update["data"]["name"] == "Nobcyborg"
+    assert name_update["data"]["name_confirmed"] == 1
+    assert name_update["data"]["name_source"] == "explicit"
+
+    assert clean_name("Noble") == "Noble"
+    assert clean_name("Noble Paul") == "Noble Paul"
+    assert clean_name("does Noble have a girlfriend") is None
+    assert clean_name("i want to eat") is None
 
     department_update = detect_user_memory_message("I study computer science")
     assert department_update["action"] == "update"
@@ -536,6 +679,10 @@ def test_memory_extractor_patterns():
     final_year_update = detect_user_memory_message("I am final year")
     assert final_year_update["action"] == "update"
     assert final_year_update["data"]["level"] == "400"
+
+    clear_name = detect_user_memory_message("stop calling me")
+    assert clear_name["action"] == "clear_name"
+    assert clear_name["field"] == "name"
 
     recall = detect_user_memory_message("what do you know about me")
     assert recall["action"] == "recall"

@@ -1,15 +1,130 @@
-﻿import re
+import re
 
-
-_GUIDANCE_LINES = [
-    "If you want, send the exact issue and I can narrow it down.",
-]
 
 _FALLBACK_RESPONSE = (
-    "I'm not fully sure yet.\n\n"
+    "I am not fully sure yet.\n\n"
     "If this is related to Godfrey Okoye University, I can help more precisely. "
-    "If not, I can still give general advice."
+    "If not, I can still give general guidance."
 )
+
+_GREETING_PHRASES = {
+    "hi",
+    "hello",
+    "hey",
+    "good morning",
+    "good afternoon",
+    "good evening",
+    "thanks",
+    "thank you",
+}
+
+_CASUAL_MARKERS = {
+    "lol",
+    "lmao",
+    "bro",
+    "boss",
+    "fam",
+    "pls",
+    "please",
+    "okay",
+    "ok",
+    "cool",
+    "nice",
+}
+
+_SERIOUS_MARKERS = {
+    "urgent",
+    "asap",
+    "important",
+    "deadline",
+    "exam",
+    "registration",
+    "issue",
+    "problem",
+    "need help",
+    "need guidance",
+}
+
+_STRESSED_MARKERS = {
+    "confused",
+    "not sure",
+    "dont understand",
+    "don't understand",
+    "no idea",
+    "stuck",
+    "help me",
+    "what do i do",
+    "what should i do",
+    "unclear",
+    "dont know",
+    "don't know",
+    "worried",
+}
+
+_FILLER_PREFIXES = [
+    r"^here(?:'s| is) a quick answer[:\-\s]*",
+    r"^here(?:'s| is) what you need to do[:\-\s]*",
+    r"^here(?:'s| is) the answer[:\-\s]*",
+    r"^here(?:'s| is) the gist[:\-\s]*",
+    r"^sure[, ]+here(?:'s| is)[:\-\s]*",
+    r"^alright[, ]+here(?:'s| is)[:\-\s]*",
+    r"^i(?:'m| am) not sure[, ]+but[:\-\s]*",
+    r"^i think[, ]*",
+    r"^big boy[, ]*",
+    r"^i like that energy[.! ]*",
+    r"^go and eat o[.! ]*",
+]
+
+_GUIDANCE_LINES = {
+    "casual": "If you want, I can keep this brief.",
+    "serious": "If you want, I can expand on any part.",
+    "stressed": "If it helps, I can break it down gently.",
+    "neutral": "If anything is unclear, I can clarify it.",
+}
+
+_INCOMPLETE_ENDINGS = {
+    "a",
+    "an",
+    "the",
+    "to",
+    "for",
+    "of",
+    "with",
+    "about",
+    "in",
+    "on",
+    "at",
+    "from",
+    "and",
+    "or",
+    "but",
+    "because",
+    "if",
+    "then",
+    "need",
+    "want",
+    "tell",
+    "show",
+    "give",
+    "send",
+    "share",
+    "ask",
+}
+
+_INCOMPLETE_PHRASES = {
+    "i need",
+    "i want",
+    "help me",
+    "tell me",
+    "show me",
+    "can you",
+    "could you",
+    "what about",
+    "how about",
+    "i am",
+    "im",
+    "i m",
+}
 
 
 def _normalize(text):
@@ -17,13 +132,69 @@ def _normalize(text):
     return " ".join(cleaned.split())
 
 
+def detect_user_tone(user_input):
+    normalized = _normalize(user_input)
+    if not normalized:
+        return "neutral"
+
+    if normalized in _GREETING_PHRASES:
+        return "neutral"
+
+    if any(_normalize(marker) in normalized for marker in _STRESSED_MARKERS):
+        return "stressed"
+
+    if any(_normalize(marker) in normalized for marker in _SERIOUS_MARKERS):
+        return "serious"
+
+    if any(_normalize(marker) in normalized for marker in _CASUAL_MARKERS):
+        return "casual"
+
+    if len(normalized.split()) <= 3 and "?" not in str(user_input):
+        return "serious"
+
+    return "neutral"
+
+
+def detect_incomplete_message(user_input):
+    text = str(user_input or "").strip()
+    if not text:
+        return False
+
+    normalized = _normalize(text)
+    if not normalized or normalized in _GREETING_PHRASES:
+        return False
+
+    lowered = text.lower().strip()
+    if lowered.endswith(("...", "…")):
+        return True
+
+    if normalized in _INCOMPLETE_PHRASES:
+        return True
+
+    tokens = normalized.split()
+    if len(tokens) == 1:
+        return tokens[0] in _INCOMPLETE_ENDINGS
+
+    if tokens[-1] in _INCOMPLETE_ENDINGS:
+        return True
+
+    if re.search(
+        r"\b(?:the|a|an|to|for|of|with|about|in|on|at|from|and|or|but|because|if|then|need|want|tell|show|give|send|share|ask)$",
+        lowered,
+    ):
+        return True
+
+    return False
+
+
 def _needs_guidance(user_input):
     if not user_input:
         return False
+
     normalized = _normalize(user_input)
-    tokens = normalized.split()
-    if len(tokens) <= 3:
-        return True
+    if normalized in _GREETING_PHRASES:
+        return False
+
     confusion_phrases = [
         "not sure",
         "confused",
@@ -36,7 +207,30 @@ def _needs_guidance(user_input):
         "not clear",
         "unclear",
     ]
-    return any(phrase in normalized for phrase in confusion_phrases) or user_input.count("?") >= 2
+    if any(_normalize(phrase) in normalized for phrase in confusion_phrases):
+        return True
+
+    return str(user_input).count("?") >= 2 or any(_normalize(phrase) in normalized for phrase in _STRESSED_MARKERS)
+
+
+def _clean_opening(text):
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return cleaned
+
+    changed = True
+    while changed:
+        changed = False
+        for pattern in _FILLER_PREFIXES:
+            updated = re.sub(pattern, "", cleaned, flags=re.IGNORECASE)
+            if updated != cleaned:
+                cleaned = updated.lstrip(" \t-:").strip()
+                changed = True
+
+    cleaned = re.sub(r"^[\-\:\,\s]+", "", cleaned)
+    cleaned = re.sub(r"[!?]{2,}", ".", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
 
 
 def _humanize_subject(answer):
@@ -148,8 +342,43 @@ def trim_response(response):
     return "\n".join(cleaned)
 
 
+def polish_response_text(text):
+    response = str(text or "").replace("\r\n", "\n").strip()
+    if not response:
+        return ""
+
+    response = re.sub(r"\n{3,}", "\n\n", response)
+    blocks = []
+    seen = set()
+
+    for block in re.split(r"\n\s*\n", response):
+        cleaned_block = block.strip()
+        if not cleaned_block:
+            continue
+
+        cleaned_block = "\n".join(line.rstrip() for line in cleaned_block.splitlines()).strip()
+        normalized = _normalize(cleaned_block)
+        if normalized and normalized in seen:
+            continue
+        if normalized:
+            seen.add(normalized)
+        blocks.append(cleaned_block)
+
+    return "\n\n".join(blocks).strip()
+
+
+def _guidance_for_tone(tone):
+    return _GUIDANCE_LINES.get(tone, _GUIDANCE_LINES["neutral"])
+
+
+def build_incomplete_message_reply():
+    return "Looks like your message got cut off — what do you need?"
+
+
 def format_response(answer, user_input=None, category=None, profile=None):
+    tone = detect_user_tone(user_input)
     base = _humanize_subject(answer)
+    base = _clean_opening(base)
     base = base.strip()
     if not base:
         base = _FALLBACK_RESPONSE
@@ -157,10 +386,12 @@ def format_response(answer, user_input=None, category=None, profile=None):
     if _should_inject_memory(user_input, profile, category=category):
         base = inject_confident_context(base, profile)
 
-    if category and str(category).lower() == "conversational":
-        return trim_response(base)
+    category_key = str(category or "").strip().lower()
+    if category_key in {"conversational", "contact_directory", "memory", "conversation_clarity", "task_workflow"}:
+        return polish_response_text(_clean_opening(base))
+
     if base.startswith("I\u2019m Governor AI for Godfrey Okoye University."):
-        return trim_response(base)
+        return polish_response_text(base)
 
     steps = _extract_steps(base)
     if steps:
@@ -185,10 +416,8 @@ def format_response(answer, user_input=None, category=None, profile=None):
             formatted = base
 
     if _needs_guidance(user_input):
-        guidance = _GUIDANCE_LINES[0]
+        guidance = _guidance_for_tone(tone)
         formatted = f"{formatted}\n\n{guidance}" if formatted else guidance
 
-    response = trim_response(formatted)
-    return response
-
-
+    response = trim_response(_clean_opening(formatted))
+    return polish_response_text(response)

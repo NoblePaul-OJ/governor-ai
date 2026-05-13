@@ -3,6 +3,9 @@ import re
 
 from flask import session
 
+from app.services.official_requests import ISSUE_WORKFLOWS, generate_issue_summary, generate_official_request
+from app.services.directory import get_contact
+from app.services.response_formatter import detect_incomplete_message
 from app.services.store import get_session_id, get_user_profile
 from app.services.task_requests_db import save_task_request
 
@@ -71,7 +74,7 @@ WORKFLOW_DEFINITIONS = {
         "label": "VC Appointment",
         "output_type": "appointment_letter",
         "recipient": "Vice Chancellor",
-        "email": "vc.office@gouni.edu.ng",
+        "email": "",
         "keywords": [
             "see the vc",
             "meet the vc",
@@ -275,6 +278,9 @@ WORKFLOW_DEFINITIONS = {
     },
 }
 
+WORKFLOW_DEFINITIONS.update(ISSUE_WORKFLOWS)
+ISSUE_WORKFLOW_KEYS = set(ISSUE_WORKFLOWS.keys())
+
 _CANCEL_TERMS = {
     "cancel",
     "stop",
@@ -377,23 +383,25 @@ def _is_hostel_booking_message(normalized):
 
 
 def handle_travel_permission(profile):
-    response = ""
+    parts = [
+        "If you want permission to travel, you should follow the Student Affairs process.",
+        "Write a short request explaining your reason for travel and how long you will be away, then take it to the Student Affairs Office for approval. Your department may also need to endorse it.",
+    ]
+    student_affairs = get_contact("student_affairs")
+    contact_bits = []
+    if student_affairs.get("phone"):
+        contact_bits.append(f"phone {student_affairs['phone']}")
+    if student_affairs.get("whatsapp"):
+        contact_bits.append(f"WhatsApp {student_affairs['whatsapp']}")
+    office_location = str(student_affairs.get("office_location") or "").strip()
+    if office_location and office_location.lower() not in {"not available yet", "unavailable yet"}:
+        contact_bits.append(f"office {office_location}")
+    if contact_bits:
+        parts.append("Student Affairs contact: " + ", ".join(contact_bits) + ".")
 
-    response += "If you want permission to travel, you need to go through the Student Affairs process.\n\n"
+    parts.append("For urgent cases, it is better to go there physically rather than relying only on calls.")
 
-    response += "First, write a simple request stating your reason for travel and how long you will be away.\n\n"
-
-    response += "Then take it to the Student Affairs Office for approval.\n\n"
-
-    response += "If required, you may also need endorsement from your department.\n\n"
-
-    response += "Student Affairs Contact:\n"
-    response += "Phone: 08166915454\n"
-    response += "Office: Not available yet\n\n"
-
-    response += "For urgent cases, it is better to go there physically rather than relying only on calls."
-
-    return response
+    return "\n\n".join(parts)
 
 
 def _detect_intent(message):
@@ -439,6 +447,7 @@ def _empty_task_state(version=0):
         "paused_step_index": 0,
         "paused_collected": {},
         "paused_workflows": {},
+        "trigger_message": None,
         "vc_appointment": _empty_vc_state(),
         "state_version": version,
     }
@@ -487,6 +496,7 @@ def _ensure_task_state(conversation_state):
         task_state.setdefault("paused_step_index", 0)
         task_state.setdefault("paused_collected", {})
         task_state.setdefault("paused_workflows", {})
+        task_state.setdefault("trigger_message", None)
         task_state.setdefault("vc_appointment", _empty_vc_state())
         _save_task_state(task_state, conversation_state)
         return task_state
@@ -498,6 +508,7 @@ def _ensure_task_state(conversation_state):
     task_state.setdefault("paused_step_index", 0)
     task_state.setdefault("paused_collected", {})
     task_state.setdefault("paused_workflows", {})
+    task_state.setdefault("trigger_message", None)
     task_state.setdefault("vc_appointment", _empty_vc_state())
     conversation_state["task_flow"] = _copy_task_state(task_state)
     return task_state
@@ -508,6 +519,7 @@ def _reset_active_workflow(task_state):
     task_state["current_step"] = None
     task_state["step_index"] = 0
     task_state["collected"] = {}
+    task_state["trigger_message"] = None
 
 
 def _vc_data(task_state):
@@ -556,6 +568,7 @@ def _pause_active_workflow(task_state):
     task_state["active_task"] = None
     task_state["current_step"] = None
     task_state["step_index"] = 0
+    task_state["trigger_message"] = task_state.get("trigger_message")
 
 
 def _resume_vc_workflow(task_state):
@@ -593,6 +606,9 @@ def _is_general_interruption(message):
     normalized = _normalize(message)
     if not normalized:
         return False
+
+    if detect_incomplete_message(message):
+        return True
 
     if "?" in (message or ""):
         return True
@@ -757,7 +773,7 @@ def _build_vc_prompt(step, vc_data):
     return "\n".join(_vc_summary_lines(vc_data))
 
 
-def _start_vc_workflow(task_state):
+def _start_vc_workflow(task_state, trigger_message=None):
     task_state["active_task"] = "vc_appointment"
     task_state["current_step"] = "step_1"
     task_state["step_index"] = 1
@@ -767,6 +783,7 @@ def _start_vc_workflow(task_state):
     task_state["paused_step"] = None
     task_state["paused_step_index"] = 0
     task_state["paused_collected"] = {}
+    task_state["trigger_message"] = str(trigger_message or "").strip()
     task_state["vc_appointment"] = _empty_vc_state()
     task_state["collected"] = task_state["vc_appointment"]
     return "\n".join(
@@ -789,6 +806,8 @@ def _complete_vc_workflow(task_state, conversation_state):
             task_label="VC Appointment",
             output_type="appointment_letter",
             payload=vc_data,
+            user_message=task_state.get("trigger_message"),
+            intent="vc_appointment",
         )
     except Exception:
         request_id = None
@@ -799,6 +818,7 @@ def _complete_vc_workflow(task_state, conversation_state):
     task_state["completed_task"] = "vc_appointment"
     task_state["last_output"] = output
     task_state["collected"] = {}
+    task_state["trigger_message"] = None
     _save_task_state(task_state, conversation_state)
 
     if request_id is not None:
@@ -846,7 +866,7 @@ def _process_vc_message(question, conversation_state):
     if active_task != "vc_appointment":
         if task_state.get("active_task"):
             _pause_active_workflow(task_state)
-        reply = _start_vc_workflow(task_state)
+        reply = _start_vc_workflow(task_state, trigger_message=message)
         _save_task_state(task_state, conversation_state)
         return {
             "handled": True,
@@ -1074,6 +1094,21 @@ def _step2_context(workflow_key, collected):
     if workflow_key == "get_transcript":
         return "Please keep your payment details and delivery preference ready for the records office."
 
+    if workflow_key == "ict_complaint":
+        return "Keep screenshots, the exact error text, and the browser or device you used ready for ICT support."
+
+    if workflow_key == "bursary_payment_complaint":
+        return "Keep your payment receipt, transaction reference, and payment date ready for verification."
+
+    if workflow_key == "registration_issue":
+        return "Keep your course details, screenshots, and the time the issue started ready for ICT support."
+
+    if workflow_key == "result_access_issue":
+        return "Keep your matric number, screenshots, and any error message ready for follow-up."
+
+    if workflow_key == "clearance_issue":
+        return "Keep your payment proof or clearance documents ready before you submit the request."
+
     return "I will now prepare the next action step."
 
 
@@ -1119,6 +1154,36 @@ def _next_actions(workflow_key, workflow, collected):
         ]
         return actions
 
+    if workflow_key == "ict_complaint":
+        return [
+            "Send the complaint draft to ICT Support.",
+            "Keep the error screenshot and browser details ready in case ICT asks for them.",
+        ]
+
+    if workflow_key == "bursary_payment_complaint":
+        return [
+            "Send the complaint draft to the Bursary Unit.",
+            "Keep your receipt, transaction reference, and payment date ready for follow-up.",
+        ]
+
+    if workflow_key == "registration_issue":
+        return [
+            "Send the complaint draft to ICT Support.",
+            "Keep screenshots of the registration page and any error message.",
+        ]
+
+    if workflow_key == "result_access_issue":
+        return [
+            "Send the complaint draft to ICT Support or the Records Office, depending on the exact issue.",
+            "Keep the portal screenshot and your matric number available.",
+        ]
+
+    if workflow_key == "clearance_issue":
+        return [
+            "Send the complaint draft to the Admissions Office or the relevant clearance desk.",
+            "Keep your payment proof or clearance documents ready.",
+        ]
+
     return ["Proceed with the responsible office using the details collected."]
 
 
@@ -1150,10 +1215,38 @@ def _subject_from_collected(workflow, collected):
     return f"{workflow['label']} Request"
 
 
-def _build_email_output(workflow_key, workflow, collected):
+def _build_issue_output(workflow_key, workflow, collected, profile=None):
+    issue_details = dict(collected or {})
+    if isinstance(profile, dict):
+        for key in ("name", "department", "level"):
+            if profile.get(key) and not issue_details.get(key):
+                issue_details[key] = profile.get(key)
+
+    issue_details["issue_type"] = workflow_key
+    issue_summary = generate_issue_summary(workflow_key, issue_details)
+    request_text = generate_official_request(workflow.get("office", "University Office"), issue_details)
+
+    lines = [
+        "Step 3",
+        f"Final summary for {workflow['label']}",
+        "",
+        "Issue summary",
+        issue_summary,
+        "",
+        "Official request draft",
+        request_text,
+    ]
+
+    return "\n".join(lines)
+
+
+def _build_email_output(workflow_key, workflow, collected, profile=None):
     recipient = workflow.get("recipient", "University Office")
-    email = workflow.get("email", "office@gouni.edu.ng")
-    sender_name = collected.get("full_name", "Student")
+    contact_key = "vc" if workflow_key == "vc_appointment" else None
+    email = ""
+    if contact_key:
+        email = get_contact(contact_key).get("email") or ""
+    sender_name = collected.get("full_name") or (profile or {}).get("name") or "Student"
     subject = _subject_from_collected(workflow, collected)
 
     lines = [
@@ -1161,7 +1254,7 @@ def _build_email_output(workflow_key, workflow, collected):
         f"Final summary for {workflow['label']}",
         "",
         "Email draft",
-        f"To: {email}",
+        f"To: {email or 'Not available'}",
         f"Subject: {subject}",
         "",
         f"Dear {recipient},",
@@ -1199,36 +1292,51 @@ def _build_step2_output(workflow_key, workflow, collected):
     return "\n".join(lines)
 
 
-def _build_output(workflow_key, workflow, collected):
+def _build_output(workflow_key, workflow, collected, profile=None):
+    if workflow_key in ISSUE_WORKFLOW_KEYS:
+        return _build_issue_output(workflow_key, workflow, collected, profile=profile)
+
     output_type = workflow["output_type"]
     if output_type == "email_draft":
-        return _build_email_output(workflow_key, workflow, collected)
+        return _build_email_output(workflow_key, workflow, collected, profile=profile)
     return _build_summary_output(workflow_key, workflow, collected)
 
 
-def _start_workflow(task_state, workflow_key):
+def _start_workflow(task_state, workflow_key, trigger_message=None):
     task_state["active_task"] = workflow_key
     task_state["current_step"] = "step_1"
     task_state["step_index"] = 1
     task_state["collected"] = {}
     task_state["completed_task"] = None
     task_state["last_output"] = None
+    task_state["trigger_message"] = str(trigger_message or "").strip()
 
     workflow = WORKFLOW_DEFINITIONS[workflow_key]
     first_field = workflow["fields"][0]
+
+    if workflow_key in ISSUE_WORKFLOW_KEYS and trigger_message:
+        issue_seed = str(trigger_message).strip()
+        if issue_seed and first_field.get("key") in {"issue_summary", "issue_details"}:
+            task_state["collected"][first_field["key"]] = issue_seed
+            first_field = _next_missing_field(workflow, task_state["collected"]) or first_field
+
+    next_question = first_field.get("question", "") if isinstance(first_field, dict) else ""
+    if workflow_key in ISSUE_WORKFLOW_KEYS and not next_question:
+        next_question = workflow.get("step_2", {}).get("question", "Reply continue when you are ready for the final summary.")
+
     return "\n".join(
         [
             workflow["intro"],
             "",
             "Step 1",
             workflow.get("step_1_context", ""),
-            first_field["question"],
+            next_question,
         ]
     )
 
 
-def _complete_workflow(task_state, workflow_key, workflow, collected, conversation_state):
-    output = _build_output(workflow_key, workflow, collected)
+def _complete_workflow(task_state, workflow_key, workflow, collected, conversation_state, profile=None):
+    output = _build_output(workflow_key, workflow, collected, profile=profile)
     output_type = workflow["output_type"]
 
     request_id = None
@@ -1238,6 +1346,8 @@ def _complete_workflow(task_state, workflow_key, workflow, collected, conversati
             task_label=workflow["label"],
             output_type=output_type,
             payload=collected,
+            user_message=task_state.get("trigger_message"),
+            intent=workflow_key,
         )
     except Exception:
         request_id = None
@@ -1247,6 +1357,7 @@ def _complete_workflow(task_state, workflow_key, workflow, collected, conversati
     task_state["step_index"] = 0
     task_state["completed_task"] = workflow_key
     task_state["last_output"] = output
+    task_state["trigger_message"] = None
     _save_task_state(task_state, conversation_state)
 
     if request_id is not None:
@@ -1311,7 +1422,7 @@ def process_task_message(question, conversation_state, profile=None, session_id=
         if not detected:
             return {"handled": False}
 
-        reply = _start_workflow(task_state, detected)
+        reply = _start_workflow(task_state, detected, trigger_message=question)
         _save_task_state(task_state, conversation_state)
         workflow = WORKFLOW_DEFINITIONS[detected]
         return {
@@ -1338,7 +1449,7 @@ def process_task_message(question, conversation_state, profile=None, session_id=
         task_state["current_step"] = "step_3"
         task_state["step_index"] = 3
         _save_task_state(task_state, conversation_state)
-        completed = _complete_workflow(task_state, active_task, workflow, collected, conversation_state)
+        completed = _complete_workflow(task_state, active_task, workflow, collected, conversation_state, profile=profile)
         completed["handled"] = True
         completed["current_step"] = None
         return completed

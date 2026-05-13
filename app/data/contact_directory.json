@@ -1,18 +1,107 @@
 {
   "vc": {
+    "phone": "",
+    "whatsapp": "",
     "email": "christiananieke2@gmail.com",
-    "office": "Not available yet",
+    "office": "Vice Chancellor's Secretariat, Administrative Block",
+    "office_hours": "",
+    "preferred_contact_method": "email",
+    "common_issues": [],
     "note": "You can send a message anytime. For physical visits, go through the VC's office/secretary."
+  },
+  "bursary": {
+    "unit_name": "Bursary Unit",
+    "phone": "08067160418",
+    "phones": [
+      "08067160418",
+      "08068084455",
+      "08068820118"
+    ],
+    "whatsapp": "",
+    "email": "info@gouni.edu.ng",
+    "emails": [
+      "info@gouni.edu.ng"
+    ],
+    "office": "Bursary Unit, Main Campus",
+    "office_hours": "Not available yet",
+    "preferred_contact_method": "Phone",
+    "common_issues": [
+      "school fees",
+      "payment complaints",
+      "clearance/payment verification",
+      "receipt issues",
+      "financial inquiries"
+    ],
+    "handles": [
+      "school fees",
+      "payment complaints",
+      "clearance/payment verification",
+      "receipt issues",
+      "financial inquiries"
+    ],
+    "note": "Handles fee-related complaints and payment verification."
   },
   "student_affairs": {
     "phone": "08166915454",
+    "whatsapp": "",
+    "email": "",
     "office": "Not available yet",
+    "office_hours": "",
+    "preferred_contact_method": "phone",
+    "common_issues": [],
     "note": "Handles student welfare, complaints, and general support."
   },
   "ict": {
-    "phone": "Not available yet",
-    "office": "Not available yet",
-    "note": "Handles portal issues, login problems, and technical support."
+    "phone": "09134273215",
+    "whatsapp": "09134273215",
+    "email": "ict@gouni.edu.ng",
+    "office_hours": "8am - 4pm",
+    "preferred_contact_method": "email/phone/WhatsApp",
+    "office": "ICT Centre, Main Campus",
+    "common_issues": [
+      "portal login issues",
+      "registration issues",
+      "payment reflection issues",
+      "result checking issues",
+      "portal errors"
+    ],
+    "note": "Handles portal login, registration, payment reflection, result checking, and technical support issues."
+  },
+  "admissions": {
+    "unit_name": "Admissions Office",
+    "phone": "09134273215",
+    "phones": [
+      "09134273215",
+      "07061756730",
+      "07065118357"
+    ],
+    "whatsapp": "",
+    "email": "admissions@gouni.edu.ng",
+    "emails": [
+      "admissions@gouni.edu.ng",
+      "info@gouni.edu.ng",
+      "chinedu@gouni.edu.ng"
+    ],
+    "office": "Admissions Office, Main Campus",
+    "office_hours": "Not available yet",
+    "preferred_contact_method": "Phone or Email",
+    "common_issues": [
+      "admissions inquiries",
+      "application issues",
+      "transfer inquiries",
+      "admission status",
+      "acceptance guidance",
+      "prospective student support"
+    ],
+    "handles": [
+      "admissions inquiries",
+      "application issues",
+      "transfer inquiries",
+      "admission status",
+      "acceptance guidance",
+      "prospective student support"
+    ],
+    "note": "Handles admission status, screening, acceptance, and clearance matters."
   },
   "hostels": {
     "sacred_heart": {

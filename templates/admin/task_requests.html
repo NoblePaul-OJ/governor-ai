@@ -12,9 +12,12 @@
         <thead>
             <tr>
                 <th>ID</th>
-                <th>Created At</th>
+                <th>Timestamp</th>
                 <th>Task</th>
+                <th>User Message</th>
+                <th>Intent</th>
                 <th>Output Type</th>
+                <th>Status</th>
                 <th>Details</th>
             </tr>
         </thead>
@@ -22,9 +25,12 @@
             {% for entry in requests %}
             <tr>
                 <td>{{ entry.id }}</td>
-                <td>{{ entry.created_at }}</td>
+                <td>{{ entry.timestamp or entry.created_at }}</td>
                 <td>{{ entry.task_label }} ({{ entry.task_key }})</td>
+                <td>{{ entry.user_message or 'Not captured yet' }}</td>
+                <td>{{ entry.intent or entry.task_key }}</td>
                 <td>{{ entry.output_type }}</td>
+                <td>{{ entry.status or 'pending' }}</td>
                 <td>
                     <pre style="white-space:pre-wrap; margin:0;">{{ entry.payload | tojson(indent=2) }}</pre>
                 </td>

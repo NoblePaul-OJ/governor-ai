@@ -3,60 +3,213 @@
 {% block title %}Admin Dashboard{% endblock %}
 
 {% block content %}
-<section class="panel">
-    <h2>Administration Dashboard</h2>
-    <p>Total queries: {{ stats.total }}</p>
-    <p>Matched: {{ stats.matched }} &ndash; Fallbacks: {{ stats.fallback }}</p>
-    <h3>Per-intent breakdown</h3>
-    <ul>
-        {% for label, count in stats.per_intent.items() %}
-        <li>{{ label or 'Unmatched' }} &ndash; {{ count }}</li>
-        {% endfor %}
-    </ul>
+<section class="panel admin-hero">
+    <div>
+        <p class="eyebrow">Admin Console</p>
+        <h1>Governor AI Management Dashboard</h1>
+        <p class="meta">
+            Manage the knowledge base, contact directory, and task requests from one place.
+            Changes are saved immediately for the live system.
+        </p>
+        <div class="admin-summary">
+            <div class="summary-card">
+                <div class="label">Knowledge Entries</div>
+                <div class="value">{{ kb_entries|length }}</div>
+            </div>
+            <div class="summary-card">
+                <div class="label">Directory Sections</div>
+                <div class="value">{{ directory_data|length }}</div>
+            </div>
+            <div class="summary-card">
+                <div class="label">Task Requests</div>
+                <div class="value">{{ task_requests|length }}</div>
+            </div>
+        </div>
+    </div>
 
-    <h3>Common keywords</h3>
-    {% if keyword_stats %}
-    <ul>
-        {% for word, count in keyword_stats %}
-        <li>{{ word }} &ndash; {{ count }}</li>
-        {% endfor %}
-    </ul>
-    {% else %}
-    <p>No keywords collected yet.</p>
-    {% endif %}
-
-    <h3>System insights</h3>
-    <p>Failed responses: {{ insights.failed_responses }}</p>
-    <p>Most requested service: {% if insights.most_requested_services %}{{ insights.most_requested_services[0].service }}{% else %}None yet{% endif %}</p>
-
-    <h4>Top queries</h4>
-    {% if insights.top_queries %}
-    <ul>
-        {% for item in insights.top_queries %}
-        <li>{{ item.query }} &ndash; {{ item.count }}</li>
-        {% endfor %}
-    </ul>
-    {% else %}
-    <p>No chat queries logged yet.</p>
-    {% endif %}
-
-    <h4>Service usage</h4>
-    {% if insights.most_requested_services %}
-    <ul>
-        {% for item in insights.most_requested_services %}
-        <li>{{ item.service }} &ndash; {{ item.count }}</li>
-        {% endfor %}
-    </ul>
-    {% else %}
-    <p>No service usage recorded yet.</p>
-    {% endif %}
-
-    <h4>Signal flags</h4>
-    <p>Confused queries: {{ insights.signal_counts.confused_queries }}</p>
-    <p>Repeated queries: {{ insights.signal_counts.repeated_queries }}</p>
-
-    <a class="btn" href="{{ url_for('admin.view_logs') }}">View recent logs</a>
-    <a class="btn" href="{{ url_for('admin.view_intents') }}">Edit intent rules</a>
-    <a class="btn" href="{{ url_for('admin.view_task_requests') }}">View task requests</a>
+    <div class="summary-card">
+        <div class="label">System Overview</div>
+        <div class="value">{{ stats.total if stats else 0 }}</div>
+        <p class="note">Total logged chats</p>
+        <div class="section-actions">
+            <a class="btn" href="{{ url_for('admin.view_logs') }}">Logs</a>
+            <a class="btn button-secondary" href="{{ url_for('admin.view_intents') }}">Intents</a>
+        </div>
+    </div>
 </section>
+
+<div class="admin-grid">
+    <section class="panel admin-section">
+        <h3>Knowledge Base Manager</h3>
+        <p class="section-note">Add, edit, or remove entries in <code>knowledgeBase.json</code>.</p>
+
+        <form method="post" class="admin-form">
+            <div class="field-grid">
+                <div class="field-group">
+                    <label for="kb-question">Question</label>
+                    <textarea id="kb-question" name="question" placeholder="Enter a user question or trigger phrase"></textarea>
+                </div>
+                <div class="field-group">
+                    <label for="kb-answer">Answer</label>
+                    <textarea id="kb-answer" name="answer" placeholder="Enter the response"></textarea>
+                </div>
+            </div>
+            <div class="card-actions">
+                <button type="submit" name="action" value="kb_add">Add Entry</button>
+            </div>
+        </form>
+
+        {% if kb_entries %}
+        {% for entry in kb_entries %}
+        <form method="post" class="admin-card">
+            <input type="hidden" name="index" value="{{ loop.index0 }}" />
+            <div class="field-grid">
+                <div class="field-group">
+                    <label>Questions</label>
+                    <textarea name="question">{{ entry.questions|default([])|join('\n') }}</textarea>
+                </div>
+                <div class="field-group">
+                    <label>Answer</label>
+                    <textarea name="answer">{{ entry.answer or '' }}</textarea>
+                </div>
+            </div>
+            <div class="card-actions">
+                <button type="submit" name="action" value="kb_update">Save Entry</button>
+                <button type="submit" class="button-danger" name="action" value="kb_delete">Delete</button>
+            </div>
+            <p class="note">Intent: {{ entry.intent or 'custom' }} | Category: {{ entry.category or 'General' }}</p>
+        </form>
+        {% endfor %}
+        {% else %}
+        <div class="empty-state">
+            <p>No knowledge base entries yet.</p>
+        </div>
+        {% endif %}
+    </section>
+
+    <section class="panel admin-section">
+        <h3>Contact Directory Manager</h3>
+        <p class="section-note">Edit the structured directory stored in <code>app/data/contact_directory.json</code>.</p>
+
+        <div class="directory-stack">
+            {% set top_sections = [
+                ('vc', 'Vice Chancellor'),
+                ('student_affairs', 'Student Affairs'),
+                ('ict', 'ICT Support'),
+                ('bursary', 'Bursary Unit'),
+                ('admissions', 'Admissions Office')
+            ] %}
+
+            {% for key, label in top_sections %}
+            {% set section = directory_data.get(key, {}) %}
+            <form method="post" class="directory-card">
+                <input type="hidden" name="section" value="{{ key }}" />
+                <h4>{{ label }}</h4>
+                <div class="field-grid">
+                    <div class="field-group">
+                        <label>Phone</label>
+                        <input type="text" name="phone" value="{{ section.get('phone', '') }}" />
+                    </div>
+                    <div class="field-group">
+                        <label>WhatsApp</label>
+                        <input type="text" name="whatsapp" value="{{ section.get('whatsapp', '') }}" />
+                    </div>
+                    <div class="field-group">
+                        <label>Email</label>
+                        <input type="text" name="email" value="{{ section.get('email', '') }}" />
+                    </div>
+                    <div class="field-group">
+                        <label>Office / Location</label>
+                        <input type="text" name="office" value="{{ section.get('office', '') }}" />
+                    </div>
+                    {% if key in ['ict', 'bursary'] %}
+                    <div class="field-group">
+                        <label>Office Hours</label>
+                        <input type="text" name="office_hours" value="{{ section.get('office_hours', '') }}" />
+                    </div>
+                    <div class="field-group">
+                        <label>Preferred Contact Method</label>
+                        <input type="text" name="preferred_contact_method" value="{{ section.get('preferred_contact_method', '') }}" />
+                    </div>
+                    {% if key in ['ict', 'bursary', 'admissions'] %}
+                    <div class="field-group">
+                        <label>Common Issue Types</label>
+                        <textarea name="common_issue_types" placeholder="Enter one issue per line or comma-separated">{{ (section.get('common_issues', []) or section.get('common_issue_types', [])) | join(', ') }}</textarea>
+                    </div>
+                    {% endif %}
+                    {% endif %}
+                </div>
+                <div class="card-actions">
+                    <button type="submit" name="action" value="directory_update">Save {{ label }}</button>
+                </div>
+            </form>
+            {% endfor %}
+
+            <div class="directory-card">
+                <h4>Hostels</h4>
+                <p class="note">Update phone and office details for each hostel record.</p>
+                <div class="directory-stack">
+                    {% for hostel_key, hostel in directory_data.get('hostels', {}).items() %}
+                    <form method="post" class="admin-card">
+                        <input type="hidden" name="section" value="hostels" />
+                        <input type="hidden" name="subkey" value="{{ hostel_key }}" />
+                        <h4>{{ hostel_key.replace('_', ' ')|title }}</h4>
+                        <div class="field-grid">
+                            <div class="field-group">
+                                <label>Phone</label>
+                                <input type="text" name="phone" value="{{ hostel.get('phone', '') }}" />
+                            </div>
+                            <div class="field-group">
+                                <label>Office / Location</label>
+                                <input type="text" name="office" value="{{ hostel.get('office', '') }}" />
+                            </div>
+                        </div>
+                        <div class="card-actions">
+                            <button type="submit" name="action" value="directory_update">Save Hostel</button>
+                        </div>
+                    </form>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="panel admin-section">
+        <h3>Task Requests Viewer</h3>
+        <p class="section-note">Review task requests from <code>task_requests_db.json</code> and mark completed ones as resolved.</p>
+
+        {% if task_requests %}
+        <div class="request-list">
+            {% for item in task_requests %}
+            <article class="request-card">
+                <div class="request-meta">
+                    <span class="status-pill admin {{ (item.status or 'pending')|lower }}">{{ item.status or 'pending' }}</span>
+                    <span>Intent: {{ item.intent or item.task_key or 'Unknown' }}</span>
+                    <span>Time: {{ item.timestamp or 'Unknown' }}</span>
+                    <span>ID: {{ item.id }}</span>
+                </div>
+                <h4>{{ item.task_label or item.task_key or 'Task Request' }}</h4>
+                <p><strong>User message:</strong> {{ item.user_message or 'Not captured yet' }}</p>
+                <div class="field-group">
+                    <label>Payload</label>
+                    <pre class="payload-json">{{ item.payload | tojson(indent=2) }}</pre>
+                </div>
+                {% if (item.status or 'pending')|lower != 'resolved' %}
+                <form method="post" class="card-actions">
+                    <input type="hidden" name="request_id" value="{{ item.id }}" />
+                    <button type="submit" class="button-secondary" name="action" value="request_resolved">Mark as Resolved</button>
+                </form>
+                {% else %}
+                <p class="note">This request is resolved.</p>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div class="empty-state">
+            <p>No task requests saved yet.</p>
+        </div>
+        {% endif %}
+    </section>
+</div>
 {% endblock %}

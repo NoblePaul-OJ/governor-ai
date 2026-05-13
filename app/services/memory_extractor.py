@@ -16,6 +16,44 @@ _CLARIFY_PHRASES = {
     "level": ("change my level", "update my level", "set my level"),
 }
 
+_NAME_RESET_PHRASES = (
+    "stop calling me",
+    "don't call me that",
+    "dont call me that",
+    "remove my name",
+    "forget my name",
+    "clear my name",
+)
+
+_NAME_BLOCKLIST = {
+    "does",
+    "do",
+    "did",
+    "have",
+    "has",
+    "had",
+    "what",
+    "why",
+    "who",
+    "when",
+    "where",
+    "how",
+    "want",
+    "need",
+    "eat",
+    "girlfriend",
+    "boyfriend",
+    "student",
+    "department",
+    "level",
+    "study",
+    "studying",
+    "call",
+    "me",
+    "my",
+    "name",
+}
+
 
 def _normalize_text(text):
     cleaned = re.sub(r"[^a-zA-Z0-9\s]", " ", (text or "").lower())
@@ -46,6 +84,32 @@ def _clean_value(field, value):
     return text
 
 
+def clean_name(text):
+    raw = str(text or "").strip()
+    if not raw or "?" in raw:
+        return None
+
+    raw = re.sub(r"^[\s,;:.-]+", "", raw)
+    raw = raw.strip(" .")
+    raw = re.sub(r"\s+", " ", raw)
+    words = re.findall(r"[A-Za-z][A-Za-z'\-]*", raw)
+    if not words or len(words) > 2:
+        return None
+
+    lowered_words = [word.lower() for word in words]
+    if any(word in _NAME_BLOCKLIST for word in lowered_words):
+        return None
+
+    joined = " ".join(words)
+    if re.search(r"\b(?:does|do|did|have|has|had|what|why|who|when|where|how)\b", joined, flags=re.IGNORECASE):
+        return None
+
+    if len(joined) > 30:
+        return None
+
+    return " ".join(part.capitalize() for part in words)
+
+
 def detect_user_memory_message(message):
     text = str(message or "").strip()
     if not text:
@@ -65,6 +129,9 @@ def detect_user_memory_message(message):
                 "field": field,
                 "prompt": "What would you like me to change it to?",
             }
+
+    if any(phrase in normalized for phrase in _NAME_RESET_PHRASES):
+        return {"action": "clear_name", "field": "name"}
 
     data = {}
 
@@ -105,14 +172,13 @@ def detect_user_memory_message(message):
     name_patterns = [
         r"\b(?:my name is|call me)\s+(?P<value>.+?)$",
         r"\b(?:change my name to|update my name to|set my name to)\s+(?P<value>.+?)$",
-        r"\b(?:i am|i'm|i m|im)\s+(?P<value>[A-Za-z][A-Za-z\s'.-]{1,50})$",
     ]
     for pattern in name_patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
 
-        value = _clean_value("name", match.group("value"))
+        value = clean_name(match.group("value"))
         lowered = _normalize_text(value)
         if not value or lowered in {"in", "studying", "study"} or any(
             term in lowered for term in {"level", "department", "student"}
@@ -120,6 +186,8 @@ def detect_user_memory_message(message):
             continue
 
         data["name"] = value
+        data["name_confirmed"] = 1
+        data["name_source"] = "explicit"
         break
 
     note_patterns = [
@@ -139,4 +207,3 @@ def detect_user_memory_message(message):
         return {"action": "update", "data": data}
 
     return None
-

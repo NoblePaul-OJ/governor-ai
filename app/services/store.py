@@ -7,6 +7,7 @@ from pathlib import Path
 
 from flask import has_app_context, session
 
+from app.services.memory_extractor import clean_name
 from app.services.task_requests_db import get_query_insights, save_chat_log
 
 QUERY_LOGS = []
@@ -130,7 +131,13 @@ def _user_row_to_profile(row):
         return {}
 
     profile = {}
-    for key in ("name", "department", "level"):
+    raw_name = str(row["name"] or "").strip()
+    name_confirmed = int(row["name_confirmed"] or 0) if "name_confirmed" in row.keys() else 0
+    sanitized_name = clean_name(raw_name)
+    if sanitized_name and name_confirmed:
+        profile["name"] = sanitized_name
+
+    for key in ("department", "level"):
         value = str(row[key] or "").strip()
         if value:
             profile[key] = value
@@ -149,13 +156,24 @@ def _user_row_to_record(row):
     record = {
         "id": row["id"],
         "session_id": row["session_id"],
-        "name": str(row["name"] or "").strip() or None,
+        "name": None,
         "department": str(row["department"] or "").strip() or None,
         "level": str(row["level"] or "").strip() or None,
         "pending_field": str(row["pending_field"] or "").strip() or None,
+        "name_confirmed": int(row["name_confirmed"] or 0) if "name_confirmed" in row.keys() else 0,
+        "name_source": None,
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
+
+    if "name_source" in row.keys():
+        record["name_source"] = str(row["name_source"] or "").strip() or None
+
+    raw_name = str(row["name"] or "").strip()
+    name_confirmed = record["name_confirmed"]
+    sanitized_name = clean_name(raw_name)
+    if sanitized_name and name_confirmed:
+        record["name"] = sanitized_name
 
     notes = _deserialize_notes(row["notes_json"])
     if notes:
@@ -174,11 +192,13 @@ def _ensure_user_exists(conn, session_id):
             department,
             level,
             pending_field,
+            name_confirmed,
+            name_source,
             notes_json,
             created_at,
             updated_at
         )
-        VALUES (?, NULL, NULL, NULL, NULL, NULL, ?, ?)
+        VALUES (?, NULL, NULL, NULL, NULL, 0, NULL, NULL, ?, ?)
         """,
         (session_id, now, now),
     )
@@ -204,16 +224,20 @@ def _upsert_user_profile(conn, session_id, profile, pending_field=None):
             department,
             level,
             pending_field,
+            name_confirmed,
+            name_source,
             notes_json,
             created_at,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(session_id) DO UPDATE SET
             name = excluded.name,
             department = excluded.department,
             level = excluded.level,
             pending_field = excluded.pending_field,
+            name_confirmed = excluded.name_confirmed,
+            name_source = excluded.name_source,
             notes_json = excluded.notes_json,
             updated_at = excluded.updated_at
         """,
@@ -223,6 +247,8 @@ def _upsert_user_profile(conn, session_id, profile, pending_field=None):
             columns["department"],
             columns["level"],
             pending_field,
+            int(profile.get("name_confirmed") or 0),
+            str(profile.get("name_source") or "").strip() or None,
             columns["notes_json"],
             created_at,
             updated_at,
@@ -277,6 +303,8 @@ def _ensure_store_db():
                 department TEXT,
                 level TEXT,
                 pending_field TEXT,
+                name_confirmed INTEGER NOT NULL DEFAULT 0,
+                name_source TEXT,
                 notes_json TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
@@ -300,6 +328,11 @@ def _ensure_store_db():
             ON messages(session_id, id)
             """
         )
+        existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
+        if "name_confirmed" not in existing_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN name_confirmed INTEGER NOT NULL DEFAULT 0")
+        if "name_source" not in existing_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN name_source TEXT")
         _migrate_legacy_tables(conn)
         conn.commit()
 
@@ -405,7 +438,7 @@ def get_user(session_id):
             conn.commit()
             row = conn.execute(
                 """
-                SELECT id, session_id, name, department, level, pending_field, notes_json, created_at, updated_at
+                SELECT id, session_id, name, department, level, pending_field, name_confirmed, name_source, notes_json, created_at, updated_at
                 FROM users
                 WHERE session_id = ?
                 """,
@@ -421,7 +454,7 @@ def load_store():
         with _connect_store() as conn:
             rows = conn.execute(
                 """
-                SELECT id, session_id, name, department, level, pending_field, notes_json, created_at, updated_at
+                SELECT id, session_id, name, department, level, pending_field, name_confirmed, name_source, notes_json, created_at, updated_at
                 FROM users
                 """
             ).fetchall()
@@ -490,6 +523,16 @@ def set_user_profile(session_id, profile):
         if value:
             merged[key] = value
 
+    if "name_confirmed" in normalized:
+        merged["name_confirmed"] = 1 if str(normalized.get("name_confirmed")).strip().lower() in {"1", "true", "yes"} else 0
+    elif current.get("name_confirmed"):
+        merged["name_confirmed"] = int(current.get("name_confirmed") or 0)
+
+    if "name_source" in normalized:
+        merged["name_source"] = str(normalized.get("name_source") or "").strip() or None
+    elif current.get("name_source"):
+        merged["name_source"] = str(current.get("name_source") or "").strip() or None
+
     if "notes" in normalized:
         merged["notes"] = _normalize_notes(normalized.get("notes"))
 
@@ -532,12 +575,26 @@ def update_user(session_id, field, value):
             if text and text not in notes:
                 notes.append(text)
         current["notes"] = notes
-    elif field in {"name", "department", "level"}:
+    elif field == "name":
+        text = clean_name(value)
+        if text:
+            current["name"] = text
+            current["name_confirmed"] = 1
+            current["name_source"] = "explicit"
+        else:
+            current["name"] = None
+            current["name_confirmed"] = 0
+            current["name_source"] = None
+    elif field in {"department", "level"}:
         text = str(value or "").strip()
         if text:
             current[field] = text
     elif field == "pending_field":
         current["pending_field"] = str(value or "").strip() or None
+    elif field == "name_confirmed":
+        current["name_confirmed"] = 1 if str(value).strip() in {"1", "true", "True"} else int(value or 0)
+    elif field == "name_source":
+        current["name_source"] = str(value or "").strip() or None
     else:
         return current
 

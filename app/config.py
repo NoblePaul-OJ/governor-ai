@@ -14,6 +14,7 @@ class Config:
         "off",
     }
     TASK_DB_PATH = os.getenv("TASK_DB_PATH", "task_requests.db")
+    TASK_REQUESTS_JSON_PATH = os.getenv("TASK_REQUESTS_JSON_PATH", "app/data/task_requests_db.json")
     QUERY_LOG_DB_ENABLED = os.getenv("QUERY_LOG_DB_ENABLED", "1").strip().lower() not in {
         "0",
         "false",

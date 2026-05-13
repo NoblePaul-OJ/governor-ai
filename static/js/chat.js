@@ -3,7 +3,6 @@ const chatForm = document.getElementById("chat-form");
 const chatInput = document.getElementById("chat-input");
 const typingIndicator = document.getElementById("typing-indicator");
 const emptyState = document.getElementById("empty-state");
-const welcomeMessage = document.getElementById("welcome");
 const STORAGE_KEY = "governor_user";
 const SESSION_KEY = "governor_session_id";
 
@@ -14,6 +13,7 @@ let profileReady = false;
 let profileInitializationPromise = null;
 let onboardingStep = 0;
 let onboardingActive = false;
+let initialGreetingMessage = null;
 let onboardingDraft = {
   name: "",
   department: "",
@@ -39,12 +39,494 @@ function typeText(element, text, speed = 10) {
   typing();
 }
 
+function escapeHtml(text) {
+  return String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function normalizeText(text) {
   return String(text || "")
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizePhoneTarget(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const cleaned = raw.replace(/[^\d+]/g, "");
+  return cleaned || raw;
+}
+
+function normalizeWhatsAppTarget(value) {
+  const raw = String(value || "").trim();
+  const digits = raw.replace(/[^\d]/g, "");
+  if (!digits) return "";
+  if (digits.startsWith("234")) return digits;
+  if (digits.startsWith("0") && digits.length === 11) {
+    return `234${digits.slice(1)}`;
+  }
+  return digits;
+}
+
+function normalizeContactList(value) {
+  if (Array.isArray(value)) {
+    const seen = new Set();
+    return value
+      .map((item) => cleanContactText(item))
+      .filter((item) => {
+        if (!item || seen.has(item)) return false;
+        seen.add(item);
+        return true;
+      });
+  }
+
+  const single = cleanContactText(value);
+  return single ? [single] : [];
+}
+
+function resolveContactValues(primary, fallback) {
+  const primaryValues = normalizeContactList(primary);
+  if (primaryValues.length) return primaryValues;
+  return normalizeContactList(fallback);
+}
+
+function cleanContactText(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+
+  const normalized = normalizeText(text);
+  const placeholders = new Set([
+    "n a",
+    "na",
+    "none",
+    "not available",
+    "not available yet",
+    "unavailable",
+    "unavailable yet",
+    "unknown",
+  ]);
+
+  if (placeholders.has(normalized)) {
+    return "";
+  }
+
+  return text;
+}
+
+function normalizeEmailTarget(value) {
+  const text = cleanContactText(value);
+  if (!text) return "";
+  return text.replace(/^mailto:/i, "").trim();
+}
+
+function isLikelyEmailAddress(value) {
+  const email = normalizeEmailTarget(value);
+  if (!email) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function formatNaturalList(items) {
+  const list = normalizeContactList(items);
+  if (!list.length) return "";
+  if (list.length === 1) return list[0];
+  if (list.length === 2) return `${list[0]} and ${list[1]}`;
+  return `${list.slice(0, -1).join(", ")}, and ${list[list.length - 1]}`;
+}
+
+function pickContactSummary(contact) {
+  if (!contact || typeof contact !== "object") return "";
+
+  const issues = normalizeContactList(contact.common_issues || contact.handles || contact.common_issue_types);
+  if (issues.length) {
+    return `${formatNaturalList(issues.slice(0, 4))}.`;
+  }
+
+  const directSummary = cleanContactText(contact.description || contact.note || "");
+  if (directSummary) {
+    const cleanedSummary = directSummary.replace(/^(handles?|provides?|supports?|manages?|offers?|covers?)\s+/i, "");
+    return cleanedSummary || directSummary;
+  }
+
+  return "";
+}
+
+function isContactReply(text, contact) {
+  if (contact && typeof contact === "object") return true;
+  const normalized = normalizeText(text);
+  return normalized.includes("contact details") || normalized.includes("phone") || normalized.includes("email");
+}
+
+function createContactAnchor(value, href, extraClass) {
+  const link = document.createElement("a");
+  link.className = `contact-link ${extraClass || ""}`.trim();
+  link.href = href;
+  link.textContent = value;
+  if (/^https?:/i.test(href)) {
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+  }
+  return link;
+}
+
+function createLabeledContactRow(label, contentNode, rowClass = "") {
+  const row = document.createElement("div");
+  row.className = `contact-row ${rowClass}`.trim();
+
+  const name = document.createElement("span");
+  name.className = "contact-label";
+  name.textContent = `${label}:`;
+
+  row.appendChild(name);
+  row.appendChild(contentNode);
+  return row;
+}
+
+function createTextContactRow(label, value, rowClass = "") {
+  if (!value) return null;
+
+  const content = document.createElement("span");
+  content.className = "contact-value";
+  content.textContent = value;
+  return createLabeledContactRow(label, content, rowClass);
+}
+
+function createLinkedContactRow(label, values, hrefFactory, extraClass, rowClass = "") {
+  const items = normalizeContactList(values);
+  if (!items.length) return null;
+
+  const stack = document.createElement("div");
+  stack.className = "contact-link-list";
+
+  items.forEach((value) => {
+    const href = hrefFactory(value);
+    if (!href) return;
+    stack.appendChild(createContactAnchor(value, href, extraClass));
+  });
+
+  if (!stack.children.length) return null;
+  return createLabeledContactRow(label, stack, rowClass);
+}
+
+function renderContactCard(contact) {
+  return renderCompactContactCard(contact);
+
+  if (!contact || typeof contact !== "object") return null;
+
+  const phoneValues = normalizeContactList(contact.phones || contact.phone);
+  const emailValues = normalizeContactList(contact.emails || contact.email);
+  const summary = pickContactSummary(contact);
+  const office = cleanContactText(contact.office_location || contact.office || "");
+  const officeHours = cleanContactText(contact.office_hours || "");
+  const preferred = cleanContactText(contact.preferred_contact_method || "");
+  const whatsapp = cleanContactText(contact.whatsapp || "");
+
+  const hasVisibleDetails = phoneValues.length || emailValues.length || whatsapp || office || officeHours || preferred || summary;
+  if (!hasVisibleDetails) {
+    return null;
+  }
+
+  const card = document.createElement("article");
+  card.className = "contact-card";
+
+  const title = document.createElement("div");
+  title.className = "contact-card-title";
+  title.textContent = contact.unit_name || contact.office_name || "Contact";
+  card.appendChild(title);
+
+  const actions = document.createElement("div");
+  actions.className = "contact-card-actions";
+  const seenActions = new Set();
+
+  phoneValues.forEach((value) => {
+    const href = `tel:${normalizePhoneTarget(value)}`;
+    const key = href.toLowerCase();
+    if (!normalizePhoneTarget(value) || seenActions.has(key)) return;
+    seenActions.add(key);
+    actions.appendChild(createContactAnchor(value, href, "phone contact-action"));
+  });
+
+  emailValues.forEach((value) => {
+    if (!value) return;
+    const href = `mailto:${value}`;
+    const key = href.toLowerCase();
+    if (seenActions.has(key)) return;
+    seenActions.add(key);
+    actions.appendChild(createContactAnchor(value, href, "email contact-action"));
+  });
+
+  if (whatsapp) {
+    const waTarget = normalizeWhatsAppTarget(whatsapp);
+    const waHref = waTarget ? `https://wa.me/${waTarget}` : `tel:${normalizePhoneTarget(whatsapp)}`;
+    const key = waHref.toLowerCase();
+    if (waHref && !seenActions.has(key)) {
+      seenActions.add(key);
+      actions.appendChild(createContactAnchor(whatsapp, waHref, "whatsapp contact-action"));
+    }
+  }
+
+  if (actions.children.length) {
+    card.appendChild(actions);
+  }
+
+  const meta = document.createElement("div");
+  meta.className = "contact-card-meta";
+
+  if (office) {
+    const officeRow = document.createElement("div");
+    officeRow.className = "contact-meta-item";
+    officeRow.innerHTML = '<span class="contact-meta-icon">📍</span>';
+    const officeText = document.createElement("span");
+    officeText.textContent = office;
+    officeRow.appendChild(officeText);
+    meta.appendChild(officeRow);
+  }
+
+  if (officeHours) {
+    const hoursRow = document.createElement("div");
+    hoursRow.className = "contact-meta-item";
+    hoursRow.innerHTML = '<span class="contact-meta-icon">🕒</span>';
+    const hoursText = document.createElement("span");
+    hoursText.textContent = officeHours;
+    hoursRow.appendChild(hoursText);
+    meta.appendChild(hoursRow);
+  }
+
+  if (preferred) {
+    const preferredRow = document.createElement("div");
+    preferredRow.className = "contact-meta-item";
+    preferredRow.innerHTML = '<span class="contact-meta-icon">✨</span>';
+    const preferredText = document.createElement("span");
+    preferredText.textContent = preferred;
+    preferredRow.appendChild(preferredText);
+    meta.appendChild(preferredRow);
+  }
+
+  if (meta.children.length) {
+    card.appendChild(meta);
+  }
+
+  if (summary) {
+    const description = document.createElement("p");
+    description.className = "contact-card-summary";
+    description.textContent = summary;
+    card.appendChild(description);
+  }
+
+  return card;
+}
+
+function createContactBadge(text, extraClass = "") {
+  const badge = document.createElement("span");
+  badge.className = `contact-badge ${extraClass}`.trim();
+  badge.textContent = text;
+  return badge;
+}
+
+function createContactValueGroup(values, hrefFactory, linkClass) {
+  const items = normalizeContactList(values);
+  if (!items.length) return null;
+
+  const group = document.createElement("div");
+  group.className = "contact-value-group";
+
+  items.forEach((value) => {
+    const href = hrefFactory ? hrefFactory(value) : "";
+    if (href) {
+      group.appendChild(createContactAnchor(value, href, linkClass));
+      return;
+    }
+
+    const textNode = document.createElement("span");
+    textNode.className = "contact-value-text";
+    textNode.textContent = value;
+    group.appendChild(textNode);
+  });
+
+  return group.children.length ? group : null;
+}
+
+function createContactDetailRow(iconText, labelText, valueNode, rowClass = "") {
+  const row = document.createElement("div");
+  row.className = `contact-detail-row ${rowClass}`.trim();
+
+  const label = document.createElement("div");
+  label.className = "contact-detail-label";
+
+  if (iconText) {
+    const icon = document.createElement("span");
+    icon.className = "contact-detail-icon";
+    icon.textContent = iconText;
+    label.appendChild(icon);
+  }
+
+  const text = document.createElement("span");
+  text.className = "contact-detail-label-text";
+  text.textContent = labelText;
+  label.appendChild(text);
+
+  row.appendChild(label);
+  row.appendChild(valueNode);
+  return row;
+}
+
+function createPlainContactValue(value) {
+  const text = document.createElement("span");
+  text.className = "contact-value-text";
+  text.textContent = value;
+  return text;
+}
+
+function renderCompactContactCard(contact) {
+  if (!contact || typeof contact !== "object") return null;
+
+  const phoneValues = resolveContactValues(contact.phones, contact.phone);
+  const emailValues = resolveContactValues(contact.emails, contact.email);
+  const summary = pickContactSummary(contact);
+  const office = cleanContactText(contact.office_location || contact.office || "");
+  const officeHours = cleanContactText(contact.office_hours || "");
+  const preferred = normalizeText(contact.preferred_contact_method || "");
+  const supportsWhatsApp = Boolean(cleanContactText(contact.whatsapp || "")) || preferred.includes("whatsapp");
+
+  const hasVisibleDetails = phoneValues.length || emailValues.length || office || officeHours || summary;
+  if (!hasVisibleDetails) {
+    return null;
+  }
+
+  const card = document.createElement("article");
+  card.className = "contact-card";
+
+  const header = document.createElement("div");
+  header.className = "contact-card-header";
+
+  const title = document.createElement("div");
+  title.className = "contact-card-title";
+  title.textContent = contact.unit_name || contact.office_name || "Contact";
+  header.appendChild(title);
+
+  card.appendChild(header);
+
+  const details = document.createElement("div");
+  details.className = "contact-card-details";
+
+  if (phoneValues.length) {
+    const phoneValue = createContactValueGroup(
+      phoneValues,
+      (value) => {
+        const target = normalizePhoneTarget(value);
+        return target ? `tel:${target}` : "";
+      },
+      "contact-link contact-link-phone",
+    );
+
+    if (phoneValue) {
+      if (supportsWhatsApp) {
+        phoneValue.prepend(createContactBadge("\u{1f4ac} WhatsApp", "contact-badge-whatsapp"));
+      }
+
+      details.appendChild(
+        createContactDetailRow(
+          "\u{1f4de}",
+          supportsWhatsApp ? "WhatsApp/Call" : "Call",
+          phoneValue,
+        ),
+      );
+    }
+  }
+
+  if (emailValues.length) {
+    const emailValue = createContactValueGroup(
+      emailValues,
+      (value) => {
+        const target = normalizeEmailTarget(value);
+        return isLikelyEmailAddress(target) ? `mailto:${target}` : "";
+      },
+      "contact-link contact-link-email",
+    );
+
+    if (emailValue) {
+      details.appendChild(createContactDetailRow("\u2709\ufe0f", "Email", emailValue));
+    }
+  }
+
+  if (office) {
+    details.appendChild(createContactDetailRow("\u{1f4cd}", "Office", createPlainContactValue(office)));
+  }
+
+  if (officeHours) {
+    details.appendChild(createContactDetailRow("\u{1f552}", "Hours", createPlainContactValue(officeHours)));
+  }
+
+  if (summary) {
+    const summaryRow = document.createElement("div");
+    summaryRow.className = "contact-summary-row";
+
+    const summaryLabel = document.createElement("span");
+    summaryLabel.className = "contact-summary-label";
+    summaryLabel.textContent = "Supports:";
+
+    const summaryValue = document.createElement("span");
+    summaryValue.className = "contact-summary-value";
+    summaryValue.textContent = summary;
+
+    summaryRow.appendChild(summaryLabel);
+    summaryRow.appendChild(summaryValue);
+    details.appendChild(summaryRow);
+  }
+
+  if (details.children.length) {
+    card.appendChild(details);
+  }
+
+  return card;
+}
+
+function cleanName(text) {
+  const raw = String(text || "").trim();
+  if (!raw || raw.includes("?")) return null;
+
+  const stripped = raw.replace(/^[\s,;:.-]+/, "").replace(/[.\s]+$/, "").replace(/\s+/g, " ");
+  const words = stripped.match(/[A-Za-z][A-Za-z'\-]*/g) || [];
+  if (!words.length || words.length > 2) return null;
+
+  const invalidWords = new Set([
+    "does",
+    "do",
+    "did",
+    "have",
+    "has",
+    "had",
+    "what",
+    "why",
+    "who",
+    "when",
+    "where",
+    "how",
+    "want",
+    "need",
+    "eat",
+    "girlfriend",
+    "boyfriend",
+    "student",
+    "department",
+    "level",
+    "study",
+    "studying",
+    "call",
+    "me",
+    "my",
+    "name",
+  ]);
+
+  if (words.some((word) => invalidWords.has(word.toLowerCase()))) return null;
+  if (stripped.length > 30) return null;
+
+  return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()).join(" ");
 }
 
 function normalizeProfile(profile) {
@@ -54,6 +536,14 @@ function normalizeProfile(profile) {
 
   ["name", "department", "level"].forEach((key) => {
     const value = String(profile[key] || "").trim();
+    if (key === "name") {
+      const cleanedName = cleanName(value);
+      if (cleanedName) {
+        normalized[key] = cleanedName;
+      }
+      return;
+    }
+
     if (value) {
       normalized[key] = value;
     }
@@ -286,11 +776,14 @@ function attachFeedback(wrapper, userMessage, botResponse) {
 function addMessage(role, text, options = {}) {
   const wrapper = document.createElement("div");
   wrapper.className = `message ${role}`;
+  if (options.initialGreeting) {
+    wrapper.dataset.initialGreeting = "true";
+  }
 
   const bubble = document.createElement("div");
   bubble.className = "bubble";
 
-  if (role === "bot") {
+  if (role === "bot" && !options.instant) {
     typeText(bubble, text, 10);
   } else {
     bubble.textContent = text;
@@ -301,6 +794,13 @@ function addMessage(role, text, options = {}) {
   stamp.textContent = now();
 
   wrapper.appendChild(bubble);
+
+  const contactCard = role === "bot" ? renderCompactContactCard(options.contact) : null;
+  if (contactCard) {
+    wrapper.classList.add("with-contact");
+    wrapper.appendChild(contactCard);
+  }
+
   wrapper.appendChild(stamp);
 
   if (role === "bot" && options.feedbackCandidate) {
@@ -310,12 +810,18 @@ function addMessage(role, text, options = {}) {
     }
   }
 
-  chatWindow.appendChild(wrapper);
+  if (options.insertBeforeEmptyState && emptyState && emptyState.parentNode === chatWindow) {
+    chatWindow.insertBefore(wrapper, emptyState);
+  } else {
+    chatWindow.appendChild(wrapper);
+  }
   chatWindow.scrollTop = chatWindow.scrollHeight;
 
   if (role === "user" && emptyState) {
     emptyState.style.display = "none";
   }
+
+  return wrapper;
 }
 
 function showTyping() {
@@ -331,6 +837,61 @@ function getGreeting() {
   if (hour < 12) return "Good morning";
   if (hour < 18) return "Good afternoon";
   return "Good evening";
+}
+
+function buildInitialGreeting(profile) {
+  const normalized = normalizeProfile(profile) || null;
+  const name = normalized && normalized.name ? normalized.name : "";
+  const department = normalized && normalized.department ? normalized.department : "";
+  const level = normalized && normalized.level ? normalized.level : "";
+
+  if (name) {
+    return `Welcome back, ${name}. I'm Governor AI. Tell me what you need and I'll help from there.`;
+  }
+
+  if (department && level) {
+    return `Welcome back. I remember you are a ${level} level ${department} student. I'm Governor AI. Tell me what you need and I'll help from there.`;
+  }
+
+  if (department) {
+    return `Welcome back. I remember your ${department} department details. I'm Governor AI. Tell me what you need and I'll help from there.`;
+  }
+
+  if (level) {
+    return `Welcome back. I remember you are a ${level} level student. I'm Governor AI. Tell me what you need and I'll help from there.`;
+  }
+
+  if (normalized) {
+    return "Welcome back. I'm Governor AI. Tell me what you need and I'll help from there.";
+  }
+
+  return `${getGreeting()}. I'm Governor AI. Tell me what you need and I'll help from there.`;
+}
+
+function renderInitialGreeting(greetingText) {
+  const text = String(greetingText || "").trim() || buildInitialGreeting(userProfile);
+  if (!text) return null;
+
+  if (initialGreetingMessage && chatWindow.contains(initialGreetingMessage)) {
+    const bubble = initialGreetingMessage.querySelector(".bubble");
+    if (bubble) {
+      bubble.textContent = text;
+    }
+
+    const stamp = initialGreetingMessage.querySelector(".stamp");
+    if (stamp) {
+      stamp.textContent = now();
+    }
+
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+    return initialGreetingMessage;
+  }
+
+  initialGreetingMessage = addMessage("bot", text, {
+    initialGreeting: true,
+    insertBeforeEmptyState: true,
+  });
+  return initialGreetingMessage;
 }
 
 function safeReadProfile() {
@@ -372,7 +933,10 @@ async function loadProfileFromServer() {
     if (!response.ok) return null;
 
     const data = await response.json();
-    return normalizeProfile(data.profile);
+    return {
+      profile: normalizeProfile(data.profile),
+      greeting: String(data.greeting || "").trim(),
+    };
   } catch (error) {
     console.error("Failed to load server profile:", error);
     return null;
@@ -388,32 +952,30 @@ function getActiveUserPayload() {
 }
 
 function setWelcomeMessage() {
+  return;
   if (!welcomeMessage) return;
 
   if (userProfile) {
-    if (userProfile.name) {
-      welcomeMessage.textContent = `Welcome back, ${userProfile.name}. How can I assist you today?`;
-    } else {
-      welcomeMessage.textContent = "Welcome back. How can I assist you today?";
-    }
+    welcomeMessage.textContent = "Welcome back. Tell me what you need and I’ll help from there.";
     return;
   }
 
-  welcomeMessage.textContent = "Good morning - I'm Governor AI. How can I assist you today?";
+  welcomeMessage.textContent = "Good morning. I'm Governor AI. Tell me what you need and I’ll help from there.";
 }
 
-function resetProfile() {
-  clearServerProfile();
+async function resetProfile() {
+  await clearServerProfile();
   safeClearProfile();
   resetFeedbackCounter();
   userProfile = null;
-  setWelcomeMessage();
-  addMessage("bot", "Good morning - I'm Governor AI. How can I assist you today?");
+  renderInitialGreeting(buildInitialGreeting(null));
+  return;
 }
 
 async function initializeProfileState() {
   const localProfile = safeReadProfile();
-  const serverProfile = await loadProfileFromServer();
+  const serverState = await loadProfileFromServer();
+  const serverProfile = serverState && serverState.profile ? serverState.profile : null;
   userProfile = normalizeProfile({
     ...(localProfile || {}),
     ...(serverProfile || {}),
@@ -423,10 +985,11 @@ async function initializeProfileState() {
     safeWriteProfile(userProfile);
   }
 
-  setWelcomeMessage();
+  const greeting = (serverState && serverState.greeting) || buildInitialGreeting(userProfile);
+  renderInitialGreeting(greeting);
 
-  if (!userProfile) {
-    addMessage("bot", "Good morning - I'm Governor AI. How can I assist you today?");
+  if (false) {
+    addMessage("bot", "Good morning. I'm Governor AI. Tell me what you need and I’ll help from there.");
   }
 
   profileReady = true;
@@ -452,7 +1015,7 @@ chatForm.addEventListener("submit", async (event) => {
   chatInput.value = "";
 
   if (normalizedMessage === "reset profile") {
-    resetProfile();
+    await resetProfile();
     return;
   }
 
@@ -495,12 +1058,13 @@ chatForm.addEventListener("submit", async (event) => {
     if (returnedProfile) {
       userProfile = returnedProfile;
       safeWriteProfile(userProfile);
-      setWelcomeMessage();
+      renderInitialGreeting(buildInitialGreeting(userProfile));
     }
 
     addMessage("bot", reply, {
       feedbackCandidate: true,
       userMessage: message,
+      contact: data.contact || null,
     });
 
     if (data.contact_suggestion) {

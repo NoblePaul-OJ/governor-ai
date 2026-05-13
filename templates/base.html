@@ -11,6 +11,10 @@
         <div class="container navbar-inner">
             <div class="logo">Governor AI</div>
             <div class="sub">Godfrey Okoye University Assistant</div>
+            <nav class="nav-links" aria-label="Primary">
+                <a href="{{ url_for('main.chat_page') }}">Chat</a>
+                <a href="{{ url_for('admin.dashboard') }}">Admin</a>
+            </nav>
         </div>
     </header>
 
