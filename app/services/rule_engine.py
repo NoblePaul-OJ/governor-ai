@@ -23,7 +23,7 @@ INTENT_RULES = {
     "admissions": {
         "label": "Admissions",
         "office": "Admissions Office",
-        "keywords": ["admission", "admitted", "clearance", "acceptance", "screening"],
+        "keywords": ["admission", "admitted", "clearance", "acceptance", "screening", "cut off", "cut-off", "jamb", "apply"],
         "response": "Admission status and acceptance procedures are managed via the admissions portal and office.",
     },
     "hostel": {
@@ -47,7 +47,7 @@ INTENT_RULES = {
     "department": {
         "label": "Departmental Inquiries",
         "office": "Department Office",
-        "keywords": ["department", "hod", "advisor", "project supervisor"],
+        "keywords": ["department", "faculty", "faculties", "hod", "advisor", "project supervisor"],
         "response": "For department-specific issues, contact your department office with your matric number and level.",
     },
     "examinations": {
@@ -67,6 +67,24 @@ INTENT_RULES = {
         "office": "Academic Affairs Office",
         "keywords": ["graduation", "convocation", "certificate", "diploma", "gown"],
         "response": "Graduation requirements and convocation details are managed by Academic Affairs.",
+    },
+    "leadership": {
+        "label": "Leadership",
+        "office": "Office of the Vice Chancellor",
+        "keywords": ["vice chancellor", "vc", "registrar", "bursar", "principal officer"],
+        "response": "Leadership information should be answered with the right confidence level, especially for offices that can change over time.",
+    },
+    "portals": {
+        "label": "University Portals",
+        "office": "ICT Support",
+        "keywords": ["portal", "erp", "transcript", "online learning", "library catalogue"],
+        "response": "Use the official university portals for ERP, admissions, postgraduate, transcript, online learning, and library services.",
+    },
+    "institutional_profile": {
+        "label": "University Profile",
+        "office": "University Information",
+        "keywords": ["motto", "founded", "catholic", "campus", "ranking", "accreditation", "partnership"],
+        "response": "Godfrey Okoye University is a private Catholic university owned by the Catholic Diocese of Enugu.",
     },
 }
 
@@ -112,12 +130,13 @@ def _classify_from_text(question):
     best_score = 0.0
 
     for intent_key, payload in INTENT_RULES.items():
-        keywords = set(payload["keywords"])
+        keywords = {_normalize(keyword) for keyword in payload["keywords"] if keyword}
         if not keywords:
             continue
 
         overlap = len(tokens & keywords)
-        score = overlap / len(keywords)
+        phrase_hits = sum(1 for keyword in keywords if " " in keyword and keyword in normalized)
+        score = (overlap + phrase_hits) / len(keywords)
 
         if score > best_score:
             best_score = score

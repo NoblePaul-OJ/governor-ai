@@ -8,7 +8,9 @@ from app.services.store import QUERY_LOGS, reset_conversation_state
 
 def test_chat_endpoint(monkeypatch):
     app = create_app()
+    app.config["ADMIN_ACCESS_KEY"] = "test-admin-key"
     client = app.test_client()
+    admin_headers = {"X-Admin-Key": "test-admin-key"}
     QUERY_LOGS.clear()
     reset_conversation_state()
 
@@ -35,18 +37,23 @@ def test_chat_endpoint(monkeypatch):
     assert data["source"] == "llm_primary"
     assert data["fallback"] is False
 
-    # logs endpoint
+    # logs endpoint is admin-protected
     resp = client.get("/api/logs")
+    assert resp.status_code == 401
+    resp = client.get("/api/logs", headers=admin_headers)
     assert resp.status_code == 200
     logs = resp.get_json()
     assert isinstance(logs, list)
 
-    # admin interface should be reachable
-    resp = client.get("/admin/")
+    # admin interface should be protected, then reachable with the admin key
+    anon_client = app.test_client()
+    resp = anon_client.get("/admin/")
+    assert resp.status_code == 302
+    resp = client.get("/admin/", headers=admin_headers)
     assert resp.status_code == 200
 
     # ensure we can fetch and update intents via admin API
-    resp = client.get("/admin/intents.json")
+    resp = client.get("/admin/intents.json", headers=admin_headers)
     assert resp.status_code == 200
     rules = resp.get_json()
     assert isinstance(rules, dict)
@@ -55,6 +62,7 @@ def test_chat_endpoint(monkeypatch):
     resp = client.post(
         "/admin/intents",
         data={"rules": json.dumps(rules)},
+        headers=admin_headers,
         content_type="application/x-www-form-urlencoded",
         follow_redirects=True,
     )
@@ -64,9 +72,11 @@ def test_chat_endpoint(monkeypatch):
 
 def test_task_flow_and_db_storage(monkeypatch, tmp_path):
     app = create_app()
+    app.config["ADMIN_ACCESS_KEY"] = "test-admin-key"
     app.config["TASK_DB_ENABLED"] = True
     app.config["TASK_DB_PATH"] = str(tmp_path / "task_requests_test.db")
     client = app.test_client()
+    admin_headers = {"X-Admin-Key": "test-admin-key"}
     QUERY_LOGS.clear()
     reset_conversation_state()
 
@@ -119,12 +129,12 @@ def test_task_flow_and_db_storage(monkeypatch, tmp_path):
     assert row[0] == "book_hostel"
     assert row[1] == "request_summary"
 
-    html_resp = client.get("/admin/task-requests")
+    html_resp = client.get("/admin/task-requests", headers=admin_headers)
     assert html_resp.status_code == 200
     assert b"Saved Task Requests" in html_resp.data
     assert b"Hostel Booking" in html_resp.data
 
-    json_resp = client.get("/admin/task-requests.json")
+    json_resp = client.get("/admin/task-requests.json", headers=admin_headers)
     assert json_resp.status_code == 200
     payload = json_resp.get_json()
     assert payload["enabled"] is True
@@ -355,6 +365,233 @@ def test_contact_directory_lookup(monkeypatch):
     assert data["contact"]["common_issues"]
 
 
+def test_academic_structure_queries_are_answered_directly(monkeypatch):
+    app = create_app()
+    client = app.test_client()
+    QUERY_LOGS.clear()
+    reset_conversation_state()
+
+    from app.blueprints.chat import routes as chat_routes
+
+    monkeypatch.setattr(
+        chat_routes,
+        "call_llm_with_retry",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("LLM should not be called")),
+    )
+
+    resp = client.post("/api/chat", json={"message": "Which faculty is computer science in"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+
+    assert data["source"] == "academic_structure"
+    assert data["category"] == "academic_structure"
+    assert data["intent"] == "computer_science_faculty"
+    assert "Faculty of Computing and Information Technology" in data["reply"]
+    assert "cut off" not in data["reply"].lower()
+
+    resp = client.post("/api/chat", json={"message": "school structure"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+
+    assert data["source"] == "academic_structure"
+    assert data["category"] == "academic_structure"
+    assert data["intent"] == "university_structure_overview"
+    assert "Godfrey Okoye University currently lists these main faculties" in data["reply"]
+
+
+def test_institutional_knowledge_answers_core_gouni_questions(monkeypatch):
+    app = create_app()
+    client = app.test_client()
+    QUERY_LOGS.clear()
+    reset_conversation_state()
+
+    from app.blueprints.chat import routes as chat_routes
+
+    monkeypatch.setattr(
+        chat_routes,
+        "call_llm_with_retry",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("LLM should not be called")),
+    )
+
+    cases = [
+        ("Who is the VC?", "vice_chancellor", "Rev. Fr. Prof. Dr. Christian Anieke", "verified_current"),
+        ("Can I pay school fees in installments?", "fee_installment_rule", "60% in the first semester", "policy"),
+        ("What is the cut off for Computer Science?", "computer_science_cutoff", "Computer Science is 160", "semi_dynamic"),
+        ("Where can I get transcript?", "transcript_portal", "https://transcript.gouni.edu.ng", "stable"),
+        ("What's happening in GOUNI recently?", "recent_announcements", "The last information available to me", "semi_dynamic"),
+    ]
+
+    for message, expected_intent, expected_text, expected_freshness in cases:
+        reset_conversation_state()
+        resp = client.post("/api/chat", json={"message": message})
+        assert resp.status_code == 200
+        data = resp.get_json()
+
+        assert data["source"] == "institutional_knowledge"
+        assert data["intent"] == expected_intent
+        assert expected_text in data["reply"]
+        assert data["freshness"] == expected_freshness
+        assert data["fallback"] is False
+
+
+def test_semi_dynamic_office_holder_uses_uncertainty(monkeypatch):
+    app = create_app()
+    client = app.test_client()
+    QUERY_LOGS.clear()
+    reset_conversation_state()
+
+    from app.blueprints.chat import routes as chat_routes
+
+    monkeypatch.setattr(
+        chat_routes,
+        "call_llm_with_retry",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("LLM should not be called")),
+    )
+
+    resp = client.post("/api/chat", json={"message": "Who is the Bursar?"})
+    assert resp.status_code == 200
+    data = resp.get_json()
+
+    assert data["source"] == "institutional_knowledge"
+    assert data["intent"] == "bursar"
+    assert data["freshness"] == "verified_current"
+    assert "latest verified university records" in data["reply"].lower()
+    assert "Prof. Dr. Modesta A. Egiyi" in data["reply"]
+
+
+def test_pioneer_staff_query_uses_assumption_engine(monkeypatch):
+    app = create_app()
+    client = app.test_client()
+    QUERY_LOGS.clear()
+    reset_conversation_state()
+
+    from app.blueprints.chat import routes as chat_routes
+
+    monkeypatch.setattr(
+        chat_routes,
+        "call_llm_with_retry",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("LLM should not be called")),
+    )
+
+    resp = client.post(
+        "/api/chat",
+        json={"message": "Tell me all the pioneer staff of Godfrey and the positions they occupied"},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+
+    assert data["source"] == "institutional_knowledge"
+    assert data["intent"] == "pioneer_management"
+    assert "earliest documented pioneer structure" in data["reply"]
+    assert "Rev. Fr. Prof. Dr. Christian Anieke" in data["reply"]
+    assert "Founder and Vice Chancellor" in data["reply"]
+    assert "which" not in data["reply"].lower()
+
+
+def test_governance_and_faculty_leadership_answers_directly(monkeypatch):
+    app = create_app()
+    client = app.test_client()
+    QUERY_LOGS.clear()
+    reset_conversation_state()
+
+    from app.blueprints.chat import routes as chat_routes
+
+    monkeypatch.setattr(
+        chat_routes,
+        "call_llm_with_retry",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("LLM should not be called")),
+    )
+
+    cases = [
+        ("Who are the principal officers?", "principal_officers", "Deputy Vice-Chancellor (Academic): Rev. Sr. Prof. Dr. Mary Sylvia Nwachukwu, DDL"),
+        ("Who is the dean of FACIT?", "dean_computing_and_it", "Prof. Dr. Ifenyinwa Angela Ajah"),
+        ("Who is the HOD of Cyber Security?", "hod_cyber_security", "Dr. Kingsley Chibueze"),
+        ("What is the governance structure of GOUNI?", "governance_structure", "Pro-Chancellor & Chairman, Governing Council"),
+        ("Who is the Minister of Education?", "minister_of_education", "Dr. Morufu Olatunji Alausa"),
+        ("Who is the Chief Medical Director?", "cmd_dean_clinical_medicine", "Prof. Dr. Amechi U. Katchy"),
+    ]
+
+    for message, expected_intent, expected_text in cases:
+        reset_conversation_state()
+        resp = client.post("/api/chat", json={"message": message})
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["source"] == "institutional_knowledge"
+        assert data["intent"] == expected_intent
+        assert expected_text in data["reply"]
+        assert data["fallback"] is False
+
+
+def test_vc_contextual_profile_followup(monkeypatch):
+    app = create_app()
+    client = app.test_client()
+    QUERY_LOGS.clear()
+    reset_conversation_state()
+
+    from app.blueprints.chat import routes as chat_routes
+
+    monkeypatch.setattr(
+        chat_routes,
+        "call_llm_with_retry",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("LLM should not be called")),
+    )
+
+    session_id = "vc-context-session"
+    first = client.post("/api/chat", json={"message": "Who is the VC?", "session_id": session_id})
+    assert first.status_code == 200
+
+    resp = client.post("/api/chat", json={"message": "Tell me about him", "session_id": session_id})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["source"] == "institutional_knowledge"
+    assert data["intent"] == "vice_chancellor_profile"
+    assert "verified current Vice-Chancellor" in data["reply"]
+    assert "founding" in data["reply"].lower()
+
+
+def test_confirmation_after_clarification_continues_without_loop(monkeypatch, tmp_path):
+    from app.services import store as store_module
+
+    monkeypatch.setattr(store_module, "STORE_DB_PATH", tmp_path / "user_sessions.db")
+
+    app = create_app()
+    client = app.test_client()
+    session_id = "clarification-loop-session"
+    QUERY_LOGS.clear()
+    reset_conversation_state()
+
+    from app.blueprints.chat import routes as chat_routes
+
+    monkeypatch.setattr(
+        chat_routes,
+        "call_llm_with_retry",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("LLM should not be called")),
+    )
+
+    store_module.save_message(
+        session_id,
+        "user",
+        "Tell me all the pioneer staff of Godfrey and the positions they occupied",
+    )
+    store_module.save_message(
+        session_id,
+        "assistant",
+        "Do you mean principal officers or the take-off year?",
+    )
+
+    resp = client.post(
+        "/api/chat",
+        json={"message": "yes that is what I mean", "session_id": session_id},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+
+    assert data["source"] == "context_continuation"
+    assert data["intent"] == "pioneer_management"
+    assert "earliest documented pioneer structure" in data["reply"]
+    assert "?" not in data["reply"]
+
+
 def test_profile_greeting_api(monkeypatch):
     app = create_app()
     client = app.test_client()
@@ -377,7 +614,7 @@ def test_profile_greeting_api(monkeypatch):
     data = resp.get_json()
 
     assert data["profile"]["name"] == "Ada Lovelace"
-    assert data["greeting"].startswith("Welcome back, Ada Lovelace")
+    assert data["greeting"] == "Welcome back, Ada Lovelace. How can I assist you today?"
 
 
 def test_ict_contact_email_is_preserved():
@@ -579,7 +816,7 @@ def test_memory_updates_overwrite_recall_and_persist(monkeypatch, tmp_path):
     data = resp.get_json()
     assert data["source"] == "memory_control"
     assert data["profile"]["name"] == "Ada Lovelace"
-    assert "remember" in data["reply"].lower()
+    assert data["reply"] == "Noted. I'll remember that."
 
     resp = client.post(
         "/api/chat",
@@ -588,19 +825,25 @@ def test_memory_updates_overwrite_recall_and_persist(monkeypatch, tmp_path):
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["profile"]["department"] == "Computer Science"
-    assert "Computer Science department" in data["reply"]
+    assert data["reply"] == "Noted. I'll remember that."
 
     resp = client.post("/api/chat", json={"message": "I am now 400 level", "session_id": session_id})
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["profile"]["level"] == "400"
-    assert "You are a 400 level Computer Science student." in data["reply"]
+    assert data["reply"] == "Noted. I'll remember that."
 
     resp = client.post("/api/chat", json={"message": "call me Grace Hopper", "session_id": session_id})
     assert resp.status_code == 200
     data = resp.get_json()
     assert data["profile"]["name"] == "Grace Hopper"
-    assert "remember" in data["reply"].lower()
+    assert data["reply"] == "Noted. I'll remember that."
+
+    resp = client.post("/api/chat", json={"message": "stop calling me Grace, call me Dave", "session_id": session_id})
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["profile"]["name"] == "Dave"
+    assert data["reply"] == "Noted. I'll remember that."
 
     resp = client.post(
         "/api/chat",
@@ -610,12 +853,12 @@ def test_memory_updates_overwrite_recall_and_persist(monkeypatch, tmp_path):
     resp = client.get("/api/profile", query_string={"session_id": session_id})
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["profile"]["name"] == "Grace Hopper"
+    assert data["profile"]["name"] == "Dave"
 
     resp = client.post("/api/chat", json={"message": "what is my name", "session_id": session_id})
     assert resp.status_code == 200
     data = resp.get_json()
-    assert data["reply"] == "Your name is Grace Hopper."
+    assert data["reply"] == "Your name is Dave."
 
     resp = client.post("/api/chat", json={"message": "change my name", "session_id": session_id})
     assert resp.status_code == 200
@@ -684,6 +927,10 @@ def test_memory_extractor_patterns():
     assert clear_name["action"] == "clear_name"
     assert clear_name["field"] == "name"
 
+    replace_name = detect_user_memory_message("stop calling me David, call me Dave")
+    assert replace_name["action"] == "update"
+    assert replace_name["data"]["name"] == "Dave"
+
     recall = detect_user_memory_message("what do you know about me")
     assert recall["action"] == "recall"
     assert recall["field"] == "summary"
@@ -704,6 +951,61 @@ def test_conversation_history_persistence(tmp_path, monkeypatch):
 
     limited = store_module.get_recent_messages(session_id, limit=2)
     assert [item["content"] for item in limited] == ["Hi there", "Tell me about hostel"]
+
+    app = create_app()
+    client = app.test_client()
+    resp = client.get("/api/history", query_string={"session_id": session_id})
+    assert resp.status_code == 200
+    payload = resp.get_json()
+    assert payload["session_id"] == session_id
+    assert [item["content"] for item in payload["messages"]] == [
+        "Hello",
+        "Hi there",
+        "Tell me about hostel",
+    ]
+
+
+def test_conversation_threads_can_be_created_and_restored(tmp_path, monkeypatch):
+    from app.services import store as store_module
+
+    monkeypatch.setattr(store_module, "STORE_DB_PATH", tmp_path / "user_sessions.db")
+
+    app = create_app()
+    client = app.test_client()
+    session_id = "thread-session"
+
+    created = client.post("/api/conversations", json={"session_id": session_id})
+    assert created.status_code == 201
+    conversation = created.get_json()["conversation"]
+    conversation_id = conversation["conversation_id"]
+
+    resp = client.post(
+        "/api/chat",
+        json={
+            "message": "how do i contact ICT",
+            "session_id": session_id,
+            "conversation_id": conversation_id,
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["conversation_id"] == conversation_id
+
+    detail = client.get(f"/api/conversations/{conversation_id}", query_string={"session_id": session_id})
+    assert detail.status_code == 200
+    payload = detail.get_json()
+    assert payload["conversation_id"] == conversation_id
+    assert [item["content"] for item in payload["messages"] if item["role"] == "user"] == [
+        "how do i contact ICT"
+    ]
+
+    listing = client.get("/api/conversations", query_string={"session_id": session_id})
+    assert listing.status_code == 200
+    listed = listing.get_json()["conversations"]
+    assert any(item["conversation_id"] == conversation_id for item in listed)
+    target = next(item for item in listed if item["conversation_id"] == conversation_id)
+    assert target["preview"] == "how do i contact ICT"
+    assert target["date_label"]
 
 
 def test_multi_user_isolation(monkeypatch, tmp_path):

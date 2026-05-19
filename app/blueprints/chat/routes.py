@@ -1,4 +1,4 @@
-﻿import json
+import json
 import os
 import re
 import tempfile
@@ -7,18 +7,35 @@ from difflib import SequenceMatcher
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, g, jsonify, request
 
 from app.services.contact_directory import load_contact_directory, resolve_contact_query
+from app.services.conversation_manager import (
+    create_conversation,
+    delete_conversation,
+    ensure_active_conversation,
+    get_conversation,
+    list_conversations,
+    rename_conversation,
+    touch_conversation,
+)
+from app.services.admin_auth import require_admin_access
 from app.services.directory import get_contact, get_hostel, get_unit_contacts
 from app.services.memory_extractor import detect_user_memory_message
-from app.services.knowledge_base import detect_hostel_context, find_relevant_entries, match_conversational
+from app.services.knowledge_base import (
+    detect_hostel_context,
+    find_relevant_entries,
+    match_conversational,
+    resolve_academic_structure_query,
+)
+from app.services.institutional_knowledge import resolve_institutional_query
 from app.services.llm import call_llm_with_retry
 from app.services.rule_engine import classify_intent
 from app.services.store import (
     QUERY_LOGS,
     clear_user_profile,
     add_log,
+    bind_session_id,
     get_conversation_state,
     get_session_id,
     get_recent_messages,
@@ -38,11 +55,14 @@ from app.services.store import (
 )
 from app.services.response_formatter import (
     build_incomplete_message_reply,
+    build_social_response,
     detect_incomplete_message,
     detect_user_tone,
     format_response,
     polish_response_text,
+    normalize_user_message,
 )
+from app.services.personality import get_persona_prompt
 from app.services.task_flow import process_task_message
 from app.services.task_requests_db import list_chat_logs
 
@@ -53,6 +73,27 @@ SMART_FALLBACK_MESSAGE = (
     "I'm having a slight delay right now, but I can still help. "
     "Could you rephrase or ask again?"
 )
+
+
+@chat_bp.after_request
+def attach_conversation_id(response):
+    conversation_id = str(getattr(g, "governor_conversation_id", "") or "").strip()
+    if not conversation_id or request.path != "/api/chat" or not response.is_json:
+        return response
+
+    payload = response.get_json(silent=True)
+    if isinstance(payload, dict) and "conversation_id" not in payload:
+        payload["conversation_id"] = conversation_id
+    if isinstance(payload, dict) and "feedback_prompt" not in payload:
+        payload["feedback_prompt"] = _feedback_prompt_for_response(
+            {"id": payload.get("log_id")},
+            payload.get("reply"),
+            fallback=bool(payload.get("fallback")),
+        )
+    if isinstance(payload, dict):
+        response.set_data(json.dumps(payload, ensure_ascii=False))
+        response.mimetype = "application/json"
+    return response
 
 HOSTEL_REGISTRATION_NOTE = (
     "Also, make sure your course registration and fees are sorted, as they can affect hostel allocation."
@@ -151,19 +192,26 @@ GENERAL_CONTACT_PROMPT = (
 )
 
 FOLLOW_UP_STYLE_GUIDANCE = (
-    "Do not ask multiple follow-up questions unnecessarily. "
+    "Avoid follow-up questions unless the answer truly depends on missing information. "
     "Answer the user's current statement first. "
+    "Infer the likely campus context when reasonable. "
+    "If the user confirms a previous interpretation, continue immediately with the best available answer instead of asking another clarification. "
     "Only ask one clarifying question if it is absolutely necessary. "
-    "If the message looks cut off, ask a calm completion question instead of guessing. "
+    "If the message is clearly incomplete and very short, ask a calm completion question instead of guessing. "
     "Prefer direct guidance and a calm, professional tone. "
     "Keep the response concise unless more detail is genuinely needed. "
     "Make the response feel natural, not like a checklist."
 )
 
 HUMAN_RESPONSE_GUIDANCE = (
+    f"{get_persona_prompt()} "
     "Respond naturally to the user's tone and intent. "
     "Use a calm, intelligent, professional style with slight warmth. "
-    "Avoid slang, childish phrasing, playful filler, and over-excitement. "
+    "Answer directly before caveats or routing. "
+    "Avoid slang, meme phrasing, childish language, playful filler, and over-excitement. "
+    "Avoid AI-sounding phrases like 'I understand', 'I can help with that', 'to guide you correctly', 'please provide', and 'I apologize'. "
+    "Emojis must be rare, contextual, and limited to one when useful; never use emoji spam. "
+    "Use subtle uncertainty phrasing such as 'The last verified information available shows...' for changing university details. "
     "Do not sound chatty or dramatic. "
     "Do not repeat stored profile details unless they are directly relevant to the current question. "
     "If the user profile is useful, mention it lightly in passing rather than restating it as a label. "
@@ -176,9 +224,15 @@ HUMAN_RESPONSE_GUIDANCE = (
 def _tone_guidance(question):
     tone = detect_user_tone(question)
     tone_map = {
+        "stressed": "The user sounds stressed or confused. Keep the reply clear, steady, and supportive. Acknowledge the difficulty.",
+        "frustrated": "The user sounds frustrated. Acknowledge the issue calmly and provide clear, practical help.",
+        "excited": "The user sounds excited or motivated. Match the energy subtly while staying professional.",
+        "urgent": "The user sounds urgent. Keep the reply direct, concise, and action-oriented.",
         "casual": "The user sounds casual. Keep the reply natural, but still calm and professional.",
         "serious": "The user sounds serious. Keep the reply direct, concise, and formal.",
-        "stressed": "The user sounds stressed or confused. Keep the reply clear, steady, and supportive.",
+        "sarcasm": "The user is being playful or sarcastic. Respond with light understanding but stay grounded.",
+        "humor": "The user is being lightly playful. Acknowledge it briefly, then stay useful and composed.",
+        "tired": "The user sounds tired. Be gentle, concise, and practical.",
         "neutral": "Use a calm, professional tone with slight warmth.",
     }
     return f"Tone guidance:\n{tone_map.get(tone, tone_map['neutral'])}"
@@ -187,23 +241,12 @@ def _tone_guidance(question):
 def _build_greeting(profile):
     profile = _normalize_user_context(profile)
     name = str(profile.get("name") or "").strip()
-    department = str(profile.get("department") or "").strip()
-    level = str(profile.get("level") or "").strip()
 
     if name:
-        return f"Welcome back, {name}. I'm Governor AI. Tell me what you need and I'll help from there."
-
-    if department and level:
-        return f"Welcome back. I remember you are a {level} level {department} student. I'm Governor AI. Tell me what you need and I'll help from there."
-
-    if department:
-        return f"Welcome back. I remember your {department} department details. I'm Governor AI. Tell me what you need and I'll help from there."
-
-    if level:
-        return f"Welcome back. I remember you are a {level} level student. I'm Governor AI. Tell me what you need and I'll help from there."
+        return f"Welcome back, {name}. How can I assist you today?"
 
     if profile:
-        return "Welcome back. I'm Governor AI. Tell me what you need and I'll help from there."
+        return "Welcome back. How can I assist you today?"
 
     hour = datetime.now().hour
     if hour < 12:
@@ -318,6 +361,65 @@ def _latest_assistant_message(messages):
     return ""
 
 
+def _is_confirmation_message(question):
+    normalized = _normalize_text(question)
+    if not normalized:
+        return False
+    confirmations = {
+        "yes",
+        "yeah",
+        "yep",
+        "correct",
+        "exactly",
+        "sure",
+        "that is what i mean",
+        "thats what i mean",
+        "that's what i mean",
+        "yes that is what i mean",
+        "yes thats what i mean",
+        "yes that's what i mean",
+        "that one",
+        "continue",
+        "go on",
+    }
+    return normalized in confirmations or any(phrase in normalized for phrase in ("that is what i mean", "thats what i mean", "that's what i mean"))
+
+
+def _assistant_asked_clarification(messages):
+    last_assistant = _latest_assistant_message(messages)
+    normalized = _normalize_text(last_assistant)
+    if not normalized:
+        return False
+    if "?" not in last_assistant:
+        return False
+    clarification_markers = (
+        "do you mean",
+        "which",
+        "what exactly",
+        "clarify",
+        "which year",
+        "what year",
+        "take off year",
+        "provide",
+        "specify",
+    )
+    return any(marker in normalized for marker in clarification_markers)
+
+
+def _previous_user_message(messages, current_question):
+    current = _normalize_text(current_question)
+    for msg in reversed(messages or []):
+        if str(msg.get("role") or "").lower() != "user":
+            continue
+        content = str(msg.get("content") or "").strip()
+        if not content:
+            continue
+        if current and _normalize_text(content) == current:
+            continue
+        return content
+    return ""
+
+
 def _avoid_repeated_response(response, history_messages, question=None):
     response_text = str(response or "").strip()
     last_assistant = _latest_assistant_message(history_messages)
@@ -344,11 +446,11 @@ def _avoid_repeated_response(response, history_messages, question=None):
     return "I've already covered that. Tell me which part you want me to focus on next."
 
 
-def _commit_assistant_response(session_id, response, history_messages, question=None, avoid_repeat=False):
+def _commit_assistant_response(session_id, response, history_messages, question=None, avoid_repeat=False, conversation_id=None):
     if avoid_repeat:
         response = _avoid_repeated_response(response, history_messages, question=question)
-    save_message(session_id, "assistant", response)
-    update_conversation_state(message=response, role="assistant", history_limit=12)
+    save_message(session_id, "assistant", response, conversation_id=conversation_id)
+    update_conversation_state(message=response, role="assistant", history_limit=12, session_id=session_id)
     return response
 
 
@@ -472,8 +574,7 @@ def _memory_profile_statement(profile):
 
 
 def _memory_confirmation(profile):
-    statement = _memory_profile_statement(profile)
-    return f"Alright, I'll remember that. {statement}" if statement else "Alright, I'll remember that."
+    return "Noted. I'll remember that."
 
 
 def _memory_recall_summary(profile):
@@ -550,6 +651,7 @@ def detect_user_update(message):
         (
             "name",
             [
+                r"\b(?:stop calling me|dont call me|don't call me)\s+.+?\s+call me\s+(?P<value>.+)$",
                 r"\b(?:change|update|set)\s+my\s+name(?:\s+to)?\s+(?P<value>.+)$",
                 r"\bcall me\s+(?P<value>.+)$",
                 r"\bmy name is\s+(?P<value>.+)$",
@@ -669,7 +771,7 @@ def _looks_like_pending_value(message):
     normalized = _normalize_text(message)
     if not normalized:
         return False
-    if normalized.startswith(("what ", "who ", "where ", "when ", "why ", "how ", "is ", "are ", "do ", "does ", "can ")):
+    if normalized.startswith(("what ", "which ", "who ", "where ", "when ", "why ", "how ", "is ", "are ", "do ", "does ", "can ")):
         return False
     return len(normalized.split()) <= 6
 
@@ -709,6 +811,9 @@ def _build_profile_payload(payload, profile=None):
     normalized_profile = _normalize_user_context(profile)
     if normalized_profile:
         data["profile"] = normalized_profile
+    conversation_id = str(getattr(g, "governor_conversation_id", "") or "").strip()
+    if conversation_id:
+        data["conversation_id"] = conversation_id
     return data
 
 
@@ -717,7 +822,7 @@ def _handle_memory_control(question, session_id, profile, task_active=False):
     memory_event = detect_user_memory_message(question)
 
     if pending_field and detect_incomplete_message(question):
-        response = "Looks like your message got cut off — what would you like me to change it to?"
+        response = "That looks a bit unfinished. What would you like me to change it to?"
         log_entry = add_log(
             question=question,
             intent=f"memory_change_{pending_field}",
@@ -989,22 +1094,7 @@ def _render_user_followup_guidance(user):
 
 
 def _build_personalized_fallback_message(user):
-    user = _normalize_user_context(user)
-    if not user:
-        return SMART_FALLBACK_MESSAGE
-
-    if user.get("department") and user.get("level"):
-        context_hint = (
-            f" I can tailor this for a {user['level']} level {user['department']} student if that helps."
-        )
-    elif user.get("department"):
-        context_hint = f" I can tailor this for your {user['department']} department if that helps."
-    elif user.get("level"):
-        context_hint = f" I can tailor this for your {user['level']} level if that helps."
-    else:
-        context_hint = ""
-
-    return f"I'm having a slight delay right now, but I can still help. Could you rephrase or ask again?{context_hint}"
+    return "Send that again in a little more detail and I'll help from there."
 
 
 def _build_intelligent_fallback_message(question, user=None, context_messages=None, kb_entries=None):
@@ -1020,22 +1110,22 @@ def _build_intelligent_fallback_message(question, user=None, context_messages=No
         return _build_personalized_fallback_message(user)
 
     if any(word in normalized for word in {"hard", "stress", "stressed", "overwhelmed", "tired", "sad", "frustrated", "confused"}):
-        return "That sounds like a lot right now. Tell me which part you want help with first."
+        return "That sounds like a lot. Start with the part affecting you most right now."
 
     if any(word in normalized for word in {"funny", "lol", "lmao", "joking", "joke", "haha"}):
-        return "What do you mean exactly? If you want, explain it a bit more and I'll help."
+        return "I get you. Send the main thing you need help with and I'll stay with it."
 
     if any(word in normalized for word in {"life", "life is hard", "everything", "nothing", "bad"}):
-        return "That sounds difficult. If you want, tell me what is making it feel that way."
+        return "That sounds difficult. Start with one thing that is weighing on you."
 
     if kb_entries:
         top_entry = kb_entries[0] or {}
         answer = str(top_entry.get("answer") or "").strip()
         matched_question = str(top_entry.get("matched_question") or "").strip().lower()
         if answer:
-            return f"I may be close here. {answer}"
+            return answer
         if matched_question:
-            return f"I might be hearing something like '{matched_question}'. Can you confirm if that's what you mean?"
+            return f"This seems related to {matched_question}. Send a bit more context and I'll narrow it down."
 
     if context_messages:
         recent_user_message = next(
@@ -1047,13 +1137,110 @@ def _build_intelligent_fallback_message(question, user=None, context_messages=No
             "",
         )
         if recent_user_message:
-            return f"I'm not fully sure, but it sounds like you mean: {recent_user_message}. Tell me a little more and I'll help."
+            return "Send a little more context and I'll narrow it down."
 
-    return "I'm not fully sure yet, but I can help if you tell me a little more about what's going on."
+    return "The current university information available to me does not include that detail yet. Send a little more context and I'll help you route it properly."
 
 def _normalize_text(text):
     cleaned = re.sub(r"[^a-zA-Z0-9\s]", " ", (text or "").lower())
     return " ".join(cleaned.split())
+
+
+def _is_institutional_info_query(question):
+    normalized = _normalize_text(question)
+    if not normalized:
+        return False
+
+    if _contains_any(normalized, ("contact", "email", "phone", "call", "reach out")):
+        return False
+    if _contains_any(
+        normalized,
+        (
+            "issue",
+            "problem",
+            "complaint",
+            "not opening",
+            "cannot",
+            "can t",
+            "cant",
+            "invalid",
+            "error",
+            "not reflecting",
+            "not reflected",
+            "failed",
+        ),
+    ):
+        return False
+
+    question_starts = (
+        "who ",
+        "what ",
+        "where ",
+        "when ",
+        "which ",
+        "how ",
+        "can ",
+        "is ",
+        "are ",
+    )
+    info_markers = (
+        "cut off",
+        "cutoff",
+        "installment",
+        "instalment",
+        "recent",
+        "happening",
+        "motto",
+        "founded",
+        "founder",
+        "portal",
+        "transcript",
+        "ranking",
+        "accreditation",
+        "scholarship",
+        "pioneer staff",
+        "pioneer management",
+        "pioneer officers",
+        "take off staff",
+        "takeoff staff",
+        "principal officers",
+        "governance structure",
+        "management hierarchy",
+        "university hierarchy",
+        "earliest management",
+        "dean",
+        "deans",
+        "hod",
+        "heads of departments",
+        "senate",
+        "board of trustees",
+        "bot",
+        "heads the",
+        "head of department",
+        "head of faculty",
+        "vice chancellor",
+        "tell me about him",
+        "tell me about her",
+        "president of nigeria",
+        "pope",
+        "governor of enugu",
+        "minister of education",
+        "executive secretary",
+        "nuc",
+        "dvc",
+        "registrar",
+        "bursar",
+        "librarian",
+        "provost",
+        "deputy provost",
+        "chief medical director",
+        "cmd",
+        "chancellor",
+        "proprietor",
+        "board of trustees",
+        "bot",
+    )
+    return normalized.startswith(question_starts) or _contains_any(normalized, info_markers)
 
 
 def _is_hostel_registration_context(context_messages):
@@ -1152,7 +1339,27 @@ def _format_unit_contact_reply(unit_key, intro=None):
         return None
 
     unit_name = contact.get("unit_name") or UNIT_INTROS.get(unit_key, unit_key.replace("_", " ").title())
-    reply = f"{unit_name} is the right office for that."
+    lines = [f"{unit_name} is the right office for that."]
+    phone_values = _clean_contact_list(contact.get("phones") or contact.get("phone"))
+    whatsapp = _clean_contact_value(contact.get("whatsapp"))
+    email_values = _clean_contact_list(contact.get("emails") or contact.get("email"))
+    office = _clean_contact_value(contact.get("office_location") or contact.get("office"))
+    office_hours = _clean_contact_value(contact.get("office_hours"))
+
+    if phone_values or whatsapp:
+        phone_label = "\U0001f4de Phone / WhatsApp:" if whatsapp or len(phone_values) == 1 else "\U0001f4de Phone:"
+        phone_lines = phone_values[:]
+        if whatsapp and whatsapp not in phone_lines:
+            phone_lines.append(whatsapp)
+        lines.extend(["", phone_label, "\n".join(phone_lines)])
+    if email_values:
+        lines.extend(["", "\U0001f4e7 Email:", "\n".join(email_values)])
+    if office:
+        lines.extend(["", "\U0001f4cd Office:", office])
+    if office_hours:
+        lines.extend(["", "\U0001f552 Office Hours:", office_hours])
+
+    reply = "\n".join(lines).strip()
 
     return {
         "handled": True,
@@ -1380,8 +1587,9 @@ def _build_prompt(question, context_messages, kb_entries, extra_instructions=Non
         "6. Keep the response concise by default and expand only when needed.\n"
         "7. Use short paragraphs by default. Use numbered steps only when the user is asking for a process or workflow. Avoid markdown symbols like *, #, or heavy bullet formatting.\n"
         "8. Do not start with filler like 'here's a quick answer' or similar phrases.\n"
-        "9. If the message looks cut off, ask a calm clarification instead of guessing.\n"
-        "10. Stay calm, intelligent, professional, and slightly warm. Never sound playful or childish."
+        "9. If the user confirms your previous interpretation, continue with the answer immediately; do not ask another clarification.\n"
+        "10. If confidence is high or medium, answer directly. Use a soft qualifier for medium confidence. Ask only one clarification when the request is genuinely impossible to infer.\n"
+        "11. Stay calm, intelligent, professional, and slightly warm. Never sound playful or childish."
     )
 
 
@@ -1389,12 +1597,35 @@ def _finalize_response(response, question, category=None, profile=None):
     return format_response(response, user_input=question, category=category, profile=profile)
 
 
+def _feedback_prompt_for_response(log_entry, response, fallback=False):
+    if fallback or not isinstance(log_entry, dict):
+        return None
+
+    try:
+        log_id = int(log_entry.get("id") or 0)
+    except (TypeError, ValueError):
+        log_id = 0
+
+    text = str(response or "").strip()
+    if log_id <= 0 or log_id % 5 != 0 or len(text.split()) < 35:
+        return None
+
+    prompts = (
+        "Did that solve your issue?",
+        "Was this helpful?",
+        "Would you like me to guide you further?",
+        "Let me know if you want a more detailed explanation.",
+    )
+    return prompts[(log_id // 5 - 1) % len(prompts)]
+
+
 @chat_bp.post("/api/chat")
 def chat_api():
     payload = request.get_json(silent=True) or {}
-    question = (payload.get("message") or "").strip()
+    question = normalize_user_message(payload.get("message"))
     incoming_profile = _normalize_user_context(payload.get("user", {}))
     session_id = _normalize_session_id(payload.get("session_id")) or get_session_id()
+    bind_session_id(session_id)
     user_record = get_user(session_id)
     user_memory = _normalize_user_context(user_record)
     profile = _merge_user_profiles(user_memory, incoming_profile)
@@ -1409,13 +1640,22 @@ def chat_api():
     if not question:
         return jsonify({"error": "message is required"}), 400
 
-    conversation_state = get_conversation_state()
-    history_before = get_recent_messages(session_id, limit=5)
+    conversation = ensure_active_conversation(
+        session_id,
+        conversation_id=payload.get("conversation_id"),
+        first_message=question,
+    )
+    conversation_id = conversation["conversation_id"] if conversation else None
+    g.governor_conversation_id = conversation_id
+
+    conversation_state = get_conversation_state(session_id)
+    history_before = get_recent_messages(session_id, limit=5, conversation_id=conversation_id)
     contextual_intent = classify_intent(question, history=history_before)
-    save_message(session_id, "user", question)
-    update_conversation_state(message=question, role="user", history_limit=12)
+    save_message(session_id, "user", question, conversation_id=conversation_id)
+    touch_conversation(session_id, conversation_id, message=question)
+    update_conversation_state(message=question, role="user", history_limit=12, session_id=session_id)
     task_active = bool((conversation_state.get("task_flow") or {}).get("active_task"))
-    context_messages = get_recent_messages(session_id, limit=5)
+    context_messages = get_recent_messages(session_id, limit=5, conversation_id=conversation_id)
     memory_result = _handle_memory_control(question, session_id, profile, task_active=task_active)
     if memory_result:
         if memory_result.get("reply"):
@@ -1427,6 +1667,133 @@ def chat_api():
                 avoid_repeat=False,
             )
         return jsonify(_build_profile_payload(memory_result, memory_result.get("profile")))
+
+    if not task_active and _is_confirmation_message(question) and _assistant_asked_clarification(history_before):
+        previous_question = _previous_user_message(history_before, question)
+        continuation_result = resolve_institutional_query(previous_question)
+        if continuation_result.get("handled"):
+            response = continuation_result.get("reply") or SMART_FALLBACK_MESSAGE
+            intent_label = continuation_result.get("intent")
+            confidence = float(continuation_result.get("confidence", 0.75))
+            category = continuation_result.get("category") or "institutional_knowledge"
+
+            update_conversation_state(
+                intent=intent_label,
+                topic=category,
+                history_limit=12,
+                session_id=session_id,
+            )
+            response = _finalize_response(response, previous_question or question, category=category, profile=profile)
+            response = _commit_assistant_response(session_id, response, history_before, question=question, avoid_repeat=False)
+            log_entry = add_log(
+                question=question,
+                intent=intent_label,
+                response=response,
+                confidence=confidence,
+                status="answered",
+                workflow_type=None,
+                is_fallback=False,
+                is_timeout=False,
+            )
+
+            return jsonify(
+                {
+                    "reply": response,
+                    "intent": intent_label,
+                    "category": category,
+                    "confidence": confidence,
+                    "source": "context_continuation",
+                    "matched_question": previous_question,
+                    "fallback": False,
+                    "contact_suggestion": None,
+                    "log_id": log_entry["id"],
+                    "freshness": continuation_result.get("freshness"),
+                }
+            )
+
+    if _normalize_text(question) in {"tell me about him", "tell me more about him", "about him"}:
+        last_assistant = _latest_assistant_message(history_before)
+        if "christian anieke" in _normalize_text(last_assistant):
+            institutional_result = resolve_institutional_query("tell me about the vice chancellor")
+            if institutional_result.get("handled"):
+                response = institutional_result.get("reply") or SMART_FALLBACK_MESSAGE
+                intent_label = institutional_result.get("intent")
+                confidence = float(institutional_result.get("confidence", 1.0))
+                category = institutional_result.get("category") or "institutional_knowledge"
+                update_conversation_state(
+                    intent=intent_label,
+                    topic=category,
+                    history_limit=12,
+                    session_id=session_id,
+                )
+                response = _finalize_response(response, question, category=category, profile=profile)
+                response = _commit_assistant_response(session_id, response, history_before, question=question, avoid_repeat=False)
+                log_entry = add_log(
+                    question=question,
+                    intent=intent_label,
+                    response=response,
+                    confidence=confidence,
+                    status="answered",
+                    workflow_type=None,
+                    is_fallback=False,
+                    is_timeout=False,
+                )
+                return jsonify(
+                    {
+                        "reply": response,
+                        "intent": intent_label,
+                        "category": category,
+                        "confidence": confidence,
+                        "source": institutional_result.get("source", "institutional_knowledge"),
+                        "matched_question": "tell me about the vice chancellor",
+                        "fallback": False,
+                        "contact_suggestion": None,
+                        "log_id": log_entry["id"],
+                        "freshness": institutional_result.get("freshness"),
+                    }
+                )
+
+    if _is_institutional_info_query(question):
+        institutional_result = resolve_institutional_query(question)
+        if institutional_result.get("handled"):
+            response = institutional_result.get("reply") or SMART_FALLBACK_MESSAGE
+            intent_label = institutional_result.get("intent")
+            confidence = float(institutional_result.get("confidence", 1.0))
+            category = institutional_result.get("category") or "institutional_knowledge"
+
+            update_conversation_state(
+                intent=intent_label,
+                topic=category,
+                history_limit=12,
+                session_id=session_id,
+            )
+            response = _finalize_response(response, question, category=category, profile=profile)
+            response = _commit_assistant_response(session_id, response, history_before, question=question, avoid_repeat=False)
+            log_entry = add_log(
+                question=question,
+                intent=intent_label,
+                response=response,
+                confidence=confidence,
+                status="answered",
+                workflow_type=None,
+                is_fallback=False,
+                is_timeout=False,
+            )
+
+            return jsonify(
+                {
+                    "reply": response,
+                    "intent": intent_label,
+                    "category": category,
+                    "confidence": confidence,
+                    "source": institutional_result.get("source", "institutional_knowledge"),
+                    "matched_question": institutional_result.get("matched_question"),
+                    "fallback": False,
+                    "contact_suggestion": None,
+                    "log_id": log_entry["id"],
+                    "freshness": institutional_result.get("freshness"),
+                }
+            )
 
     task_result = process_task_message(
         question,
@@ -1448,6 +1815,7 @@ def chat_api():
                 intent=task_key,
                 topic="task_workflow",
                 history_limit=12,
+                session_id=session_id,
             )
 
         if completed:
@@ -1494,6 +1862,46 @@ def chat_api():
             }
         )
 
+    academic_result = resolve_academic_structure_query(question)
+    if academic_result.get("handled"):
+        response = academic_result.get("reply") or SMART_FALLBACK_MESSAGE
+        intent_label = academic_result.get("intent")
+        confidence = float(academic_result.get("confidence", 1.0))
+        category = academic_result.get("category") or "academic_structure"
+
+        update_conversation_state(
+            intent=intent_label,
+            topic=category,
+            history_limit=12,
+            session_id=session_id,
+        )
+        response = _finalize_response(response, question, category=category, profile=profile)
+        response = _commit_assistant_response(session_id, response, history_before, question=question, avoid_repeat=False)
+        log_entry = add_log(
+            question=question,
+            intent=intent_label,
+            response=response,
+            confidence=confidence,
+            status="answered",
+            workflow_type=None,
+            is_fallback=False,
+            is_timeout=False,
+        )
+
+        return jsonify(
+            {
+                "reply": response,
+                "intent": intent_label,
+                "category": category,
+                "confidence": confidence,
+                "source": academic_result.get("source", "academic_structure"),
+                "matched_question": None,
+                "fallback": False,
+                "contact_suggestion": None,
+                "log_id": log_entry["id"],
+            }
+        )
+
     if detect_incomplete_message(question):
         response = build_incomplete_message_reply()
         response = _finalize_response(response, question, category="conversation_clarity", profile=profile)
@@ -1519,6 +1927,35 @@ def chat_api():
                 "fallback": False,
                 "contact_suggestion": None,
                 "log_id": log_entry["id"],
+            }
+        )
+
+    social_response = build_social_response(question, profile=profile)
+    if social_response:
+        response = _finalize_response(social_response, question, category="conversational", profile=profile)
+        response = _commit_assistant_response(session_id, response, history_before, question=question, avoid_repeat=False)
+        log_entry = add_log(
+            question=question,
+            intent="social_context",
+            response=response,
+            confidence=0.92,
+            status="answered",
+            workflow_type=None,
+            is_fallback=False,
+            is_timeout=False,
+        )
+        return jsonify(
+            {
+                "reply": response,
+                "intent": "social_context",
+                "category": "conversational",
+                "confidence": 0.92,
+                "source": "personality_layer",
+                "matched_question": None,
+                "fallback": False,
+                "contact_suggestion": None,
+                "log_id": log_entry["id"],
+                "profile": _normalize_user_context(profile),
             }
         )
 
@@ -1567,7 +2004,12 @@ def chat_api():
         response = directory_result.get("reply") or SMART_FALLBACK_MESSAGE
         confidence = float(directory_result.get("confidence", 1.0))
         intent_label = directory_result.get("intent")
-        update_conversation_state(intent=intent_label, topic=directory_result.get("category"), history_limit=12)
+        update_conversation_state(
+            intent=intent_label,
+            topic=directory_result.get("category"),
+            history_limit=12,
+            session_id=session_id,
+        )
         response = _finalize_response(response, question, category=directory_result.get("category"), profile=profile)
         response = _commit_assistant_response(session_id, response, history_before, question=question, avoid_repeat=False)
         log_entry = add_log(
@@ -1609,6 +2051,7 @@ def chat_api():
                 intent=intent_label,
                 topic="contact_directory",
                 history_limit=12,
+                session_id=session_id,
             )
 
         response = _finalize_response(response, question, category="contact_directory", profile=profile)
@@ -1639,6 +2082,47 @@ def chat_api():
             }
         )
 
+    institutional_result = resolve_institutional_query(question)
+    if institutional_result.get("handled"):
+        response = institutional_result.get("reply") or SMART_FALLBACK_MESSAGE
+        intent_label = institutional_result.get("intent")
+        confidence = float(institutional_result.get("confidence", 1.0))
+        category = institutional_result.get("category") or "institutional_knowledge"
+
+        update_conversation_state(
+            intent=intent_label,
+            topic=category,
+            history_limit=12,
+            session_id=session_id,
+        )
+        response = _finalize_response(response, question, category=category, profile=profile)
+        response = _commit_assistant_response(session_id, response, history_before, question=question, avoid_repeat=False)
+        log_entry = add_log(
+            question=question,
+            intent=intent_label,
+            response=response,
+            confidence=confidence,
+            status="answered",
+            workflow_type=None,
+            is_fallback=False,
+            is_timeout=False,
+        )
+
+        return jsonify(
+            {
+                "reply": response,
+                "intent": intent_label,
+                "category": category,
+                "confidence": confidence,
+                "source": institutional_result.get("source", "institutional_knowledge"),
+                "matched_question": institutional_result.get("matched_question"),
+                "fallback": False,
+                "contact_suggestion": None,
+                "log_id": log_entry["id"],
+                "freshness": institutional_result.get("freshness"),
+            }
+        )
+
     hostel_match = match_conversational(question)
     hostel_context = detect_hostel_context(question)
     hostel_direct = bool(hostel_match.get("matched") and str(hostel_match.get("category") or "").lower() == "hostel")
@@ -1658,6 +2142,7 @@ def chat_api():
             intent=intent_label,
             topic=category,
             history_limit=12,
+            session_id=session_id,
         )
         response = _finalize_response(response, question, category=category, profile=profile)
         response = _commit_assistant_response(session_id, response, history_before, question=question, avoid_repeat=False)
@@ -1730,6 +2215,7 @@ def chat_api():
                 intent=intent_label,
                 topic=category or intent_label,
                 history_limit=12,
+                session_id=session_id,
             )
         if hostel_context:
             response = _clean_hostel_response(response)
@@ -1788,22 +2274,41 @@ def feedback_api():
     message = str(payload.get("message") or "").strip()
     response = str(payload.get("response") or "").strip()
     feedback = str(payload.get("feedback") or "").strip().lower()
+    feedback_aliases = {
+        "yes": "helpful",
+        "no": "not_helpful",
+        "helpful": "helpful",
+        "not_helpful": "not_helpful",
+        "not helpful": "not_helpful",
+        "inaccurate": "inaccurate",
+        "report_inaccurate": "inaccurate",
+    }
+    feedback_type = feedback_aliases.get(feedback, feedback)
     comment_value = payload.get("comment")
     comment = "" if comment_value is None else str(comment_value).strip()
+    session_id = _normalize_session_id(payload.get("session_id")) or get_session_id()
+    bind_session_id(session_id)
 
-    if not message or not response or feedback not in {"yes", "no"}:
+    if not message or not response or feedback_type not in {"helpful", "not_helpful", "inaccurate"}:
         return jsonify({"error": "message, response, and feedback are required"}), 400
 
     data = {
+        "session_id": session_id,
         "message": message,
+        "user_message": message,
         "response": response,
-        "feedback": feedback,
+        "ai_response": response,
+        "feedback": feedback_type,
+        "feedback_type": feedback_type,
         "comment": comment,
+        "log_id": payload.get("log_id"),
+        "intent": payload.get("intent"),
+        "category": payload.get("category"),
+        "source": payload.get("source"),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
     _append_feedback_entry(data)
-    print("Feedback received:", data)
 
     return jsonify({"ok": True}), 201
 
@@ -1812,17 +2317,22 @@ def feedback_api():
 def profile_reset_api():
     payload = request.get_json(silent=True) or {}
     session_id = _normalize_session_id(payload.get("session_id")) or get_session_id()
+    bind_session_id(session_id)
     clear_user_profile(session_id)
+    reset_state = get_conversation_state(session_id)
+    reset_state["history"] = []
     return jsonify({"ok": True}), 200
 
 
 @chat_bp.get("/api/profile")
 def profile_get_api():
     session_id = _normalize_session_id(request.args.get("session_id")) or get_session_id()
+    bind_session_id(session_id)
     profile = get_user_profile(session_id)
     pending_field = get_pending_field(session_id)
     return jsonify(
         {
+            "session_id": session_id,
             "profile": _normalize_user_context(profile),
             "pending_field": pending_field,
             "greeting": _build_greeting(profile),
@@ -1830,8 +2340,132 @@ def profile_get_api():
     )
 
 
+@chat_bp.get("/api/history")
+def history_get_api():
+    session_id = _normalize_session_id(request.args.get("session_id")) or get_session_id()
+    conversation_id = _normalize_session_id(request.args.get("conversation_id"))
+    bind_session_id(session_id)
+    conversation = ensure_active_conversation(session_id, conversation_id=conversation_id)
+    conversation_id = conversation["conversation_id"] if conversation else None
+    g.governor_conversation_id = conversation_id
+
+    try:
+        limit = int(request.args.get("limit", 80))
+    except (TypeError, ValueError):
+        limit = 80
+    limit = min(max(limit, 1), 200)
+
+    profile = get_user_profile(session_id)
+    messages = get_recent_messages(session_id, limit=limit, conversation_id=conversation_id)
+    return jsonify(
+        {
+            "session_id": session_id,
+            "conversation_id": conversation_id,
+            "conversation": conversation,
+            "messages": messages,
+            "profile": _normalize_user_context(profile),
+            "greeting": _build_greeting(profile),
+        }
+    )
+
+
+@chat_bp.get("/api/conversations")
+def conversations_get_api():
+    session_id = _normalize_session_id(request.args.get("session_id")) or get_session_id()
+    bind_session_id(session_id)
+    active = ensure_active_conversation(session_id, conversation_id=request.args.get("conversation_id"))
+    conversations = list_conversations(session_id)
+    return jsonify(
+        {
+            "session_id": session_id,
+            "active_conversation_id": active["conversation_id"] if active else None,
+            "conversations": conversations,
+        }
+    )
+
+
+@chat_bp.post("/api/conversations")
+def conversations_create_api():
+    payload = request.get_json(silent=True) or {}
+    session_id = _normalize_session_id(payload.get("session_id")) or get_session_id()
+    bind_session_id(session_id)
+    title = str(payload.get("title") or "").strip() or None
+    conversation = create_conversation(session_id, title=title)
+    return jsonify({"session_id": session_id, "conversation": conversation}), 201
+
+
+@chat_bp.get("/api/conversations/<conversation_id>")
+def conversation_detail_api(conversation_id):
+    session_id = _normalize_session_id(request.args.get("session_id")) or get_session_id()
+    bind_session_id(session_id)
+    conversation = get_conversation(session_id, conversation_id)
+    if not conversation:
+        return jsonify({"error": "conversation not found"}), 404
+
+    try:
+        limit = int(request.args.get("limit", 200))
+    except (TypeError, ValueError):
+        limit = 200
+    limit = min(max(limit, 1), 300)
+
+    profile = get_user_profile(session_id)
+    messages = get_recent_messages(session_id, limit=limit, conversation_id=conversation_id)
+    return jsonify(
+        {
+            "session_id": session_id,
+            "conversation_id": conversation_id,
+            "conversation": conversation,
+            "messages": messages,
+            "profile": _normalize_user_context(profile),
+            "greeting": _build_greeting(profile),
+        }
+    )
+
+
+@chat_bp.patch("/api/conversations/<conversation_id>")
+def conversation_rename_api(conversation_id):
+    payload = request.get_json(silent=True) or {}
+    session_id = _normalize_session_id(payload.get("session_id")) or get_session_id()
+    bind_session_id(session_id)
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        return jsonify({"error": "title is required"}), 400
+
+    conversation = rename_conversation(session_id, conversation_id, title)
+    if not conversation:
+        return jsonify({"error": "conversation not found"}), 404
+
+    return jsonify({"session_id": session_id, "conversation": conversation})
+
+
+@chat_bp.delete("/api/conversations/<conversation_id>")
+def conversation_delete_api(conversation_id):
+    payload = request.get_json(silent=True) or {}
+    session_id = _normalize_session_id(payload.get("session_id")) or get_session_id()
+    bind_session_id(session_id)
+
+    deleted = delete_conversation(session_id, conversation_id)
+    if not deleted:
+        return jsonify({"error": "conversation not found"}), 404
+
+    latest = ensure_active_conversation(session_id)
+    return jsonify(
+        {
+            "ok": True,
+            "session_id": session_id,
+            "active_conversation_id": latest["conversation_id"] if latest else None,
+            "conversation": latest,
+            "conversations": list_conversations(session_id),
+        }
+    )
+
+
 @chat_bp.get("/api/logs")
 def logs_api():
+    protection = require_admin_access()
+    if protection:
+        return protection
+
     logs = list_chat_logs(limit=100)
     if logs:
         return jsonify(logs)
@@ -1840,6 +2474,10 @@ def logs_api():
 
 @chat_bp.get("/api/intents")
 def intents_api():
+    protection = require_admin_access()
+    if protection:
+        return protection
+
     from app.services.rule_engine import INTENT_RULES
 
     return jsonify(
@@ -1852,7 +2490,3 @@ def intents_api():
             for key, row in INTENT_RULES.items()
         ]
     )
-
-
-
-

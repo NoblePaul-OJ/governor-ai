@@ -13,6 +13,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 KB_PATH = REPO_ROOT / "knowledgeBase.json"
 DIRECTORY_PATH = REPO_ROOT / "app" / "data" / "contact_directory.json"
 TASK_REQUESTS_JSON_PATH = REPO_ROOT / "app" / "data" / "task_requests_db.json"
+FEEDBACK_PATH = REPO_ROOT / "app" / "data" / "feedback.json"
+INSTITUTIONAL_KNOWLEDGE_PATH = REPO_ROOT / "app" / "data" / "institutional_knowledge.json"
 
 
 def _resolve_path(raw_path, default_path):
@@ -41,6 +43,20 @@ def _task_requests_path():
     if has_app_context():
         raw_path = current_app.config.get("TASK_REQUESTS_JSON_PATH")
     return _resolve_path(raw_path, TASK_REQUESTS_JSON_PATH)
+
+
+def _feedback_path():
+    raw_path = None
+    if has_app_context():
+        raw_path = current_app.config.get("FEEDBACK_PATH")
+    return _resolve_path(raw_path, FEEDBACK_PATH)
+
+
+def _institutional_knowledge_path():
+    raw_path = None
+    if has_app_context():
+        raw_path = current_app.config.get("INSTITUTIONAL_KNOWLEDGE_PATH")
+    return _resolve_path(raw_path, INSTITUTIONAL_KNOWLEDGE_PATH)
 
 
 def _read_json(path, default):
@@ -159,6 +175,24 @@ def delete_knowledge_entry(index):
 def load_directory_data():
     data = _read_json(_directory_path(), {})
     return data if isinstance(data, dict) else {}
+
+
+def load_institutional_knowledge_data():
+    data = _read_json(_institutional_knowledge_path(), {})
+    return data if isinstance(data, dict) else {}
+
+
+def save_institutional_knowledge_data(payload):
+    if not isinstance(payload, dict):
+        raise ValueError("Institutional knowledge must be a JSON object")
+    _write_json(_institutional_knowledge_path(), payload)
+    try:
+        from app.services import institutional_knowledge
+
+        institutional_knowledge._CACHE = None
+    except Exception:
+        pass
+    return payload
 
 
 def save_directory_data(data):
@@ -314,6 +348,60 @@ def load_task_requests(limit=300):
         _write_json(_task_requests_path(), merged)
 
     return merged[: max(1, int(limit))]
+
+
+def load_feedback_entries(limit=200):
+    entries = _read_json(_feedback_path(), [])
+    if not isinstance(entries, list):
+        return []
+
+    normalized = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        normalized.append(
+            {
+                "session_id": str(entry.get("session_id") or "").strip(),
+                "message": str(entry.get("message") or entry.get("user_message") or "").strip(),
+                "response": str(entry.get("response") or entry.get("ai_response") or "").strip(),
+                "feedback": str(entry.get("feedback") or entry.get("feedback_type") or "").strip(),
+                "comment": str(entry.get("comment") or "").strip(),
+                "intent": str(entry.get("intent") or "").strip(),
+                "category": str(entry.get("category") or "").strip(),
+                "source": str(entry.get("source") or "").strip(),
+                "timestamp": str(entry.get("timestamp") or "").strip(),
+            }
+        )
+
+    normalized.sort(key=lambda item: item.get("timestamp") or "", reverse=True)
+    return normalized[: max(1, int(limit))]
+
+
+def summarize_feedback(limit=200):
+    entries = load_feedback_entries(limit=limit)
+    counts = {"helpful": 0, "not_helpful": 0, "inaccurate": 0}
+    repeated_topics = {}
+    recent_issues = []
+
+    for entry in entries:
+        feedback = entry.get("feedback") or ""
+        if feedback in counts:
+            counts[feedback] += 1
+        topic = entry.get("intent") or entry.get("category") or "unknown"
+        if feedback in {"not_helpful", "inaccurate"}:
+            repeated_topics[topic] = repeated_topics.get(topic, 0) + 1
+            if entry.get("comment") or entry.get("message"):
+                recent_issues.append(entry)
+
+    return {
+        "total": len(entries),
+        "counts": counts,
+        "repeated_issue_topics": [
+            {"topic": topic, "count": count}
+            for topic, count in sorted(repeated_topics.items(), key=lambda item: item[1], reverse=True)[:10]
+        ],
+        "recent_issues": recent_issues[:10],
+    }
 
 
 def save_task_request_json(record):

@@ -50,6 +50,7 @@ def _create_chat_log_table(conn):
         """
         CREATE TABLE IF NOT EXISTS chat_query_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT,
             user_query TEXT NOT NULL,
             bot_response TEXT NOT NULL,
             timestamp TEXT NOT NULL,
@@ -64,6 +65,9 @@ def _create_chat_log_table(conn):
         )
         """
     )
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(chat_query_logs)").fetchall()}
+    if "session_id" not in columns:
+        conn.execute("ALTER TABLE chat_query_logs ADD COLUMN session_id TEXT")
 
 
 def _read_json_file(path, default):
@@ -175,6 +179,7 @@ def _normalize_query(text):
 def save_chat_log(
     user_query,
     bot_response,
+    session_id=None,
     detected_intent=None,
     workflow_type=None,
     status="answered",
@@ -195,6 +200,7 @@ def save_chat_log(
         cursor = conn.execute(
             """
             INSERT INTO chat_query_logs (
+                session_id,
                 user_query,
                 bot_response,
                 timestamp,
@@ -207,9 +213,10 @@ def save_chat_log(
                 is_repeated_query,
                 normalized_query
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                str(session_id or "").strip() or None,
                 str(user_query or "").strip(),
                 str(bot_response or "").strip(),
                 timestamp,
@@ -278,6 +285,7 @@ def list_chat_logs(limit=200):
             """
             SELECT
                 id,
+                session_id,
                 user_query,
                 bot_response,
                 timestamp,
@@ -299,26 +307,27 @@ def list_chat_logs(limit=200):
 
     entries = []
     for row in rows:
-        status = row[6]
-        detected_intent = row[4]
-        workflow_type = row[5]
-        confidence = 0.0 if status in {"unanswered", "fallback", "timeout"} or row[7] or row[8] else 1.0
+        status = row[7]
+        detected_intent = row[5]
+        workflow_type = row[6]
+        confidence = 0.0 if status in {"unanswered", "fallback", "timeout"} or row[8] or row[9] else 1.0
         entries.append(
             {
                 "id": row[0],
-                "user_query": row[1],
-                "bot_response": row[2],
-                "timestamp": row[3],
+                "session_id": row[1],
+                "user_query": row[2],
+                "bot_response": row[3],
+                "timestamp": row[4],
                 "detected_intent": detected_intent,
                 "workflow_type": workflow_type,
                 "status": status,
-                "is_fallback": bool(row[7]),
-                "is_timeout": bool(row[8]),
-                "is_confused_query": bool(row[9]),
-                "is_repeated_query": bool(row[10]),
-                "normalized_query": row[11],
-                "question": row[1],
-                "response": row[2],
+                "is_fallback": bool(row[8]),
+                "is_timeout": bool(row[9]),
+                "is_confused_query": bool(row[10]),
+                "is_repeated_query": bool(row[11]),
+                "normalized_query": row[12],
+                "question": row[2],
+                "response": row[3],
                 "intent": workflow_type or detected_intent,
                 "confidence": confidence,
             }

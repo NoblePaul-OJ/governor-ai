@@ -63,10 +63,15 @@ def test_admin_dashboard_crud(monkeypatch, tmp_path):
     monkeypatch.setattr(admin_store, "TASK_REQUESTS_JSON_PATH", task_requests_path)
 
     app = create_app()
+    app.config["ADMIN_ACCESS_KEY"] = "test-admin-key"
     app.config["TASK_REQUESTS_JSON_PATH"] = str(task_requests_path)
     client = app.test_client()
+    admin_headers = {"X-Admin-Key": "test-admin-key"}
 
     resp = client.get("/admin/")
+    assert resp.status_code == 302
+
+    resp = client.get("/admin/", headers=admin_headers)
     assert resp.status_code == 200
     assert b"Knowledge Base Manager" in resp.data
     assert b"Contact Directory Manager" in resp.data
@@ -79,6 +84,7 @@ def test_admin_dashboard_crud(monkeypatch, tmp_path):
             "question": "Where is the ICT office?",
             "answer": "Go to the ICT support desk.",
         },
+        headers=admin_headers,
         follow_redirects=True,
     )
     assert resp.status_code == 200
@@ -96,6 +102,7 @@ def test_admin_dashboard_crud(monkeypatch, tmp_path):
             "question": "Hello there",
             "answer": "Welcome back.",
         },
+        headers=admin_headers,
         follow_redirects=True,
     )
     assert resp.status_code == 200
@@ -110,6 +117,7 @@ def test_admin_dashboard_crud(monkeypatch, tmp_path):
             "action": "kb_delete",
             "index": "1",
         },
+        headers=admin_headers,
         follow_redirects=True,
     )
     assert resp.status_code == 200
@@ -127,6 +135,7 @@ def test_admin_dashboard_crud(monkeypatch, tmp_path):
             "email": "vc@example.com",
             "office": "Main Campus",
         },
+        headers=admin_headers,
         follow_redirects=True,
     )
     assert resp.status_code == 200
@@ -142,6 +151,7 @@ def test_admin_dashboard_crud(monkeypatch, tmp_path):
             "action": "request_resolved",
             "request_id": "1",
         },
+        headers=admin_headers,
         follow_redirects=True,
     )
     assert resp.status_code == 200

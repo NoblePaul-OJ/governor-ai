@@ -28,6 +28,77 @@ _HOSTEL_PHRASES = (
     "move hostel",
 )
 
+_ACADEMIC_FACULTIES = (
+    "Arts",
+    "Education",
+    "Management and Social Sciences",
+    "Natural and Applied Sciences",
+    "Law",
+    "College of Medicine",
+    "Faculty of Computing and Information Technology (FACIT)",
+)
+
+_ACADEMIC_PROGRAMS = {
+    "computer science": "Faculty of Computing and Information Technology (FACIT)",
+    "software engineering": "Faculty of Computing and Information Technology (FACIT)",
+    "cybersecurity": "Faculty of Computing and Information Technology (FACIT)",
+    "data science": "Faculty of Computing and Information Technology (FACIT)",
+    "computer science education": "Faculty of Education",
+    "computer science edu": "Faculty of Education",
+    "nursing": "College of Medicine",
+    "medicine and surgery": "College of Medicine",
+    "accounting": "Faculty of Management and Social Sciences",
+    "banking and finance": "Faculty of Management and Social Sciences",
+    "management": "Faculty of Management and Social Sciences",
+    "marketing": "Faculty of Management and Social Sciences",
+    "public administration": "Faculty of Management and Social Sciences",
+    "economics": "Faculty of Management and Social Sciences",
+    "political science": "Faculty of Management and Social Sciences",
+    "international relations": "Faculty of Management and Social Sciences",
+    "mass communication": "Faculty of Management and Social Sciences",
+    "mass communications": "Faculty of Management and Social Sciences",
+    "philosophy": "Faculty of Management and Social Sciences",
+    "psychology": "Faculty of Management and Social Sciences",
+    "religious studies": "Faculty of Management and Social Sciences",
+    "sociology": "Faculty of Management and Social Sciences",
+    "history and international studies": "Faculty of Arts",
+    "history, international studies": "Faculty of Arts",
+    "music": "Faculty of Arts",
+    "english and lit studies": "Faculty of Arts",
+    "applied biology": "Faculty of Natural and Applied Sciences",
+    "biotechnology": "Faculty of Natural and Applied Sciences",
+    "microbiology": "Faculty of Natural and Applied Sciences",
+    "chemistry": "Faculty of Natural and Applied Sciences",
+    "biochemistry": "Faculty of Natural and Applied Sciences",
+    "industrial chemistry": "Faculty of Natural and Applied Sciences",
+    "mathematics": "Faculty of Natural and Applied Sciences",
+    "physics": "Faculty of Natural and Applied Sciences",
+    "architecture": "Faculty of Natural and Applied Sciences",
+    "law": "Faculty of Law",
+    "juris and intl law": "Faculty of Law",
+    "public law": "Faculty of Law",
+    "private and biz law": "Faculty of Law",
+}
+
+_ACADEMIC_QUERY_PHRASES = (
+    "which faculty",
+    "what faculty",
+    "which department",
+    "what department",
+    "faculty of",
+    "department of",
+    "school structure",
+    "school faculties",
+    "faculty list",
+    "course list",
+    "where is",
+    "where does",
+    "what courses",
+    "which courses",
+    "program structure",
+    "university structure",
+)
+
 
 def _normalize(text):
     cleaned = re.sub(r"[^a-zA-Z0-9\\s]", " ", (text or "").lower())
@@ -269,3 +340,91 @@ def find_relevant_entries(user_input, limit=3, min_confidence=0.3):
 
     candidates.sort(key=lambda item: item["confidence"], reverse=True)
     return candidates[:limit]
+
+
+def _academic_program_match(normalized_input):
+    for program, faculty in sorted(_ACADEMIC_PROGRAMS.items(), key=lambda item: len(item[0]), reverse=True):
+        if program in normalized_input:
+            return program, faculty
+    return None, None
+
+
+def _academic_reply_for_program(program, faculty, wants_department=False):
+    label = " ".join(part.capitalize() for part in program.split())
+    if wants_department:
+        return f"{label} is a department in the {faculty} at Godfrey Okoye University."
+    return f"{label} is under the {faculty} at Godfrey Okoye University."
+
+
+def _academic_structure_overview():
+    return (
+        "Godfrey Okoye University currently lists these main faculties: "
+        f"{', '.join(_ACADEMIC_FACULTIES[:-1])}, and {_ACADEMIC_FACULTIES[-1]}. "
+        "If you want, I can point you to the faculty for a specific course."
+    )
+
+
+def resolve_academic_structure_query(user_input):
+    normalized_input = _normalize(user_input)
+    if not normalized_input:
+        return {"handled": False}
+
+    if any(phrase in normalized_input for phrase in _ACADEMIC_QUERY_PHRASES):
+        program, faculty = _academic_program_match(normalized_input)
+        if program and faculty:
+            wants_department = "department" in normalized_input and "faculty" not in normalized_input
+            reply = _academic_reply_for_program(program, faculty, wants_department=wants_department)
+            return {
+                "handled": True,
+                "source": "academic_structure",
+                "intent": f"{program.replace(' ', '_')}_{'department' if wants_department else 'faculty'}",
+                "category": "academic_structure",
+                "reply": reply,
+                "confidence": 1.0,
+                "matched_question": None,
+                "fallback": False,
+                "use_llm": False,
+            }
+
+        if any(phrase in normalized_input for phrase in ("school structure", "school faculties", "faculty list", "course list", "university structure")):
+            return {
+                "handled": True,
+                "source": "academic_structure",
+                "intent": "university_structure_overview",
+                "category": "academic_structure",
+                "reply": _academic_structure_overview(),
+                "confidence": 1.0,
+                "matched_question": None,
+                "fallback": False,
+                "use_llm": False,
+            }
+
+    program, faculty = _academic_program_match(normalized_input)
+    if program and faculty and (normalized_input == program or any(phrase in normalized_input for phrase in _ACADEMIC_QUERY_PHRASES)):
+        reply = _academic_reply_for_program(program, faculty, wants_department="department" in normalized_input)
+        return {
+            "handled": True,
+            "source": "academic_structure",
+            "intent": f"{program.replace(' ', '_')}_{'department' if 'department' in normalized_input else 'faculty'}",
+            "category": "academic_structure",
+            "reply": reply,
+            "confidence": 1.0,
+            "matched_question": None,
+            "fallback": False,
+            "use_llm": False,
+        }
+
+    if any(phrase in normalized_input for phrase in ("school structure", "school faculties", "faculty list", "course list", "university structure")):
+        return {
+            "handled": True,
+            "source": "academic_structure",
+            "intent": "university_structure_overview",
+            "category": "academic_structure",
+            "reply": _academic_structure_overview(),
+            "confidence": 1.0,
+            "matched_question": None,
+            "fallback": False,
+            "use_llm": False,
+        }
+
+    return {"handled": False}

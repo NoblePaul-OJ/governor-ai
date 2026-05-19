@@ -22,3 +22,10 @@ class Config:
         "off",
     }
     QUERY_LOG_DB_PATH = os.getenv("QUERY_LOG_DB_PATH", "chat_query_logs.db")
+    ADMIN_ACCESS_KEY = (
+        os.getenv("ADMIN_ACCESS_KEY")
+        or os.getenv("ADMIN_PASSWORD")
+        or os.getenv("ADMIN_KEY")
+        or ""
+    )
+    ADMIN_ROUTE_PREFIX = os.getenv("ADMIN_ROUTE_PREFIX", "/admin")

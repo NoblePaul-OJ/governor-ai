@@ -334,6 +334,10 @@ _TASK_HINT = (
 _SESSION_KEY = "task_flow_state"
 
 
+def _task_session_key():
+    return f"{_SESSION_KEY}:{get_session_id()}"
+
+
 def _normalize(text):
     cleaned = re.sub(r"[^a-zA-Z0-9\s]", " ", (text or "").lower())
     return " ".join(cleaned.split())
@@ -475,7 +479,7 @@ def _save_task_state(task_state, conversation_state):
     version = _state_version(conversation_state)
     task_state["state_version"] = version
     copied = _copy_task_state(task_state)
-    session[_SESSION_KEY] = copied
+    session[_task_session_key()] = copied
     session.modified = True
     conversation_state["task_flow"] = _copy_task_state(task_state)
     return task_state
@@ -483,7 +487,7 @@ def _save_task_state(task_state, conversation_state):
 
 def _ensure_task_state(conversation_state):
     version = _state_version(conversation_state)
-    session_state = session.get(_SESSION_KEY)
+    session_state = session.get(_task_session_key())
     if not isinstance(session_state, dict) or session_state.get("state_version") != version:
         task_state = conversation_state.get("task_flow")
         if not isinstance(task_state, dict) or task_state.get("state_version") != version:
@@ -616,6 +620,7 @@ def _is_general_interruption(message):
     question_starts = (
         "how ",
         "what ",
+        "which ",
         "where ",
         "when ",
         "why ",

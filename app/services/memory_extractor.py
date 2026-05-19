@@ -25,6 +25,12 @@ _NAME_RESET_PHRASES = (
     "clear my name",
 )
 
+_NAME_REPLACE_PATTERNS = (
+    r"\bstop calling me\s+.+?\s+call me\s+(?P<value>.+?)$",
+    r"\bdon't call me\s+.+?\s+call me\s+(?P<value>.+?)$",
+    r"\bdont call me\s+.+?\s+call me\s+(?P<value>.+?)$",
+)
+
 _NAME_BLOCKLIST = {
     "does",
     "do",
@@ -131,6 +137,20 @@ def detect_user_memory_message(message):
             }
 
     if any(phrase in normalized for phrase in _NAME_RESET_PHRASES):
+        for pattern in _NAME_REPLACE_PATTERNS:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if not match:
+                continue
+            value = clean_name(match.group("value"))
+            if value:
+                return {
+                    "action": "update",
+                    "data": {
+                        "name": value,
+                        "name_confirmed": 1,
+                        "name_source": "explicit",
+                    },
+                }
         return {"action": "clear_name", "field": "name"}
 
     data = {}

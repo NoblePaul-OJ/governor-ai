@@ -1,0 +1,321 @@
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
+
+*{margin:0;padding:0;box-sizing:border-box}
+
+.splash{
+  width:100%;
+  min-height:520px;
+  background:#050E1F;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  position:relative;
+  overflow:hidden;
+  font-family:'Inter',sans-serif;
+  border-radius:16px;
+}
+
+.bg-glow{
+  position:absolute;
+  width:520px;
+  height:520px;
+  border-radius:50%;
+  background:radial-gradient(circle, rgba(24,95,165,0.18) 0%, transparent 70%);
+  top:50%;left:50%;
+  transform:translate(-50%,-50%);
+  pointer-events:none;
+}
+
+.bg-glow-2{
+  position:absolute;
+  width:300px;height:300px;
+  border-radius:50%;
+  background:radial-gradient(circle, rgba(15,110,86,0.12) 0%, transparent 70%);
+  top:30%;left:60%;
+  pointer-events:none;
+}
+
+.grid-lines{
+  position:absolute;
+  inset:0;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size:48px 48px;
+  pointer-events:none;
+}
+
+.corner-deco{
+  position:absolute;
+  width:60px;height:60px;
+  border-color:rgba(24,95,165,0.3);
+  border-style:solid;
+}
+.corner-deco.tl{top:24px;left:24px;border-width:1.5px 0 0 1.5px;}
+.corner-deco.tr{top:24px;right:24px;border-width:1.5px 1.5px 0 0;}
+.corner-deco.bl{bottom:24px;left:24px;border-width:0 0 1.5px 1.5px;}
+.corner-deco.br{bottom:24px;right:24px;border-width:0 1.5px 1.5px 0;}
+
+.dot{
+  position:absolute;
+  width:5px;height:5px;
+  border-radius:50%;
+  background:rgba(24,95,165,0.35);
+}
+.dot-1{top:72px;left:120px;}
+.dot-2{top:60px;right:100px;width:7px;height:7px;background:rgba(15,110,86,0.3);}
+.dot-3{bottom:80px;left:80px;width:4px;height:4px;}
+.dot-4{bottom:60px;right:130px;width:6px;height:6px;background:rgba(24,95,165,0.25);}
+
+.plus{
+  position:absolute;
+  color:rgba(24,95,165,0.28);
+  font-size:20px;
+  font-weight:300;
+  line-height:1;
+}
+.plus-1{bottom:70px;left:55px;}
+.plus-2{top:55px;right:55px;color:rgba(15,110,86,0.25);}
+
+.content{
+  position:relative;
+  z-index:2;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:0;
+}
+
+.badge{
+  font-size:11px;
+  font-weight:600;
+  letter-spacing:0.18em;
+  color:rgba(24,95,165,0.9);
+  text-transform:uppercase;
+  margin-bottom:18px;
+  padding:5px 14px;
+  border:1px solid rgba(24,95,165,0.25);
+  border-radius:20px;
+  background:rgba(24,95,165,0.08);
+}
+
+.logo-wrap{
+  display:flex;
+  align-items:center;
+  gap:16px;
+  margin-bottom:10px;
+}
+
+.logo-icon{
+  width:56px;height:56px;
+  border-radius:14px;
+  background:linear-gradient(135deg,#0F6E56 0%,#185FA5 100%);
+  display:flex;align-items:center;justify-content:center;
+  position:relative;
+  flex-shrink:0;
+  box-shadow:0 0 28px rgba(24,95,165,0.35);
+}
+
+.logo-icon svg{width:30px;height:30px;}
+
+.app-name{
+  font-size:52px;
+  font-weight:800;
+  color:#FFFFFF;
+  letter-spacing:-1.5px;
+  line-height:1;
+}
+
+.app-name span{
+  background:linear-gradient(90deg,#5DCAA5 0%,#85B7EB 60%,#FFFFFF 100%);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+
+.tagline{
+  font-size:13.5px;
+  font-weight:400;
+  color:rgba(255,255,255,0.38);
+  letter-spacing:0.04em;
+  margin-top:10px;
+  margin-bottom:44px;
+  text-align:center;
+}
+
+.loader-wrap{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:14px;
+}
+
+.loader-bar-bg{
+  width:200px;
+  height:3px;
+  background:rgba(255,255,255,0.08);
+  border-radius:2px;
+  overflow:hidden;
+}
+
+.loader-bar-fill{
+  height:100%;
+  width:0%;
+  border-radius:2px;
+  background:linear-gradient(90deg,#0F6E56,#185FA5,#5DCAA5);
+  animation:fillBar 2.8s cubic-bezier(0.4,0,0.2,1) forwards;
+}
+
+@keyframes fillBar{
+  0%{width:0%}
+  30%{width:45%}
+  60%{width:72%}
+  85%{width:90%}
+  100%{width:100%}
+}
+
+.loader-dots{
+  display:flex;
+  gap:6px;
+  align-items:center;
+}
+
+.loader-dots span{
+  width:5px;height:5px;
+  border-radius:50%;
+  background:rgba(255,255,255,0.5);
+  animation:pulse 1.4s ease-in-out infinite;
+}
+.loader-dots span:nth-child(2){animation-delay:0.2s}
+.loader-dots span:nth-child(3){animation-delay:0.4s}
+
+@keyframes pulse{
+  0%,100%{opacity:0.25;transform:scale(1)}
+  50%{opacity:1;transform:scale(1.3)}
+}
+
+.loading-text{
+  font-size:11px;
+  font-weight:500;
+  letter-spacing:0.16em;
+  color:rgba(255,255,255,0.28);
+  text-transform:uppercase;
+  animation:blink 2s ease-in-out infinite;
+}
+
+@keyframes blink{
+  0%,100%{opacity:0.5}
+  50%{opacity:1}
+}
+
+.powered-wrap{
+  position:absolute;
+  bottom:26px;
+  display:flex;
+  align-items:center;
+  gap:8px;
+  z-index:2;
+}
+
+.powered-text{
+  font-size:11px;
+  font-weight:400;
+  color:rgba(255,255,255,0.22);
+  letter-spacing:0.06em;
+}
+
+.powered-brand{
+  font-size:12px;
+  font-weight:700;
+  color:rgba(255,255,255,0.55);
+  letter-spacing:0.04em;
+}
+
+.powered-divider{
+  width:1px;height:12px;
+  background:rgba(255,255,255,0.15);
+}
+
+.version-tag{
+  position:absolute;
+  top:26px;
+  right:100px;
+  font-size:10px;
+  font-weight:500;
+  color:rgba(255,255,255,0.18);
+  letter-spacing:0.1em;
+  z-index:2;
+}
+</style>
+
+<div class="splash" role="img" aria-label="Governor AI splash screen loading">
+
+  <div class="bg-glow"></div>
+  <div class="bg-glow-2"></div>
+  <div class="grid-lines"></div>
+
+  <div class="corner-deco tl"></div>
+  <div class="corner-deco tr"></div>
+  <div class="corner-deco bl"></div>
+  <div class="corner-deco br"></div>
+
+  <div class="dot dot-1"></div>
+  <div class="dot dot-2"></div>
+  <div class="dot dot-3"></div>
+  <div class="dot dot-4"></div>
+  <div class="plus plus-1">+</div>
+  <div class="plus plus-2">+</div>
+
+  <div class="version-tag">v1.0.0</div>
+
+  <div class="content">
+    <div class="badge">AI-Powered University Assistant</div>
+
+    <div class="logo-wrap">
+      <div class="logo-icon" aria-hidden="true">
+        <svg viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="15" cy="9" r="4.5" stroke="white" stroke-width="1.6"/>
+          <path d="M7 24c0-4.418 3.582-8 8-8s8 3.582 8 8" stroke="white" stroke-width="1.6" stroke-linecap="round"/>
+          <path d="M21 6l3-2M21 12l3 2M9 6L6 4M9 12L6 14" stroke="rgba(255,255,255,0.5)" stroke-width="1.2" stroke-linecap="round"/>
+          <circle cx="24" cy="4" r="1.5" fill="rgba(255,255,255,0.6)"/>
+          <circle cx="24" cy="14" r="1.5" fill="rgba(255,255,255,0.6)"/>
+          <circle cx="6" cy="4" r="1.5" fill="rgba(255,255,255,0.6)"/>
+          <circle cx="6" cy="14" r="1.5" fill="rgba(255,255,255,0.6)"/>
+        </svg>
+      </div>
+      <div class="app-name"><span>Governor</span> AI</div>
+    </div>
+
+    <div class="tagline">Intelligent Student Support &nbsp;·&nbsp; African Universities</div>
+
+    <div class="loader-wrap">
+      <div class="loader-bar-bg">
+        <div class="loader-bar-fill"></div>
+      </div>
+      <div class="loader-dots" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <div class="loading-text" id="loading-txt">Initialising</div>
+    </div>
+  </div>
+
+  <div class="powered-wrap">
+    <span class="powered-text">powered by</span>
+    <div class="powered-divider"></div>
+    <span class="powered-brand">NobCyborg</span>
+  </div>
+</div>
+
+<script>
+const msgs = ["Initialising","Loading knowledge base","Connecting services","Almost ready"];
+let i = 0;
+const el = document.getElementById('loading-txt');
+const iv = setInterval(()=>{
+  i++;
+  if(i < msgs.length){ el.textContent = msgs[i]; }
+  else { el.textContent = "Ready"; clearInterval(iv); }
+}, 700);
+</script>

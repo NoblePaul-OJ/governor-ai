@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Access{% endblock %}
+
+{% block content %}
+<section class="panel admin-login">
+    <p class="eyebrow">Protected Area</p>
+    <h2>Admin Access</h2>
+    <p class="meta">Enter the admin key configured for this deployment.</p>
+
+    {% if not configured %}
+    <div class="flash error">ADMIN_ACCESS_KEY is not configured, so admin tools are locked.</div>
+    {% endif %}
+
+    <form method="post" class="admin-form">
+        <div class="field-group">
+            <label for="admin-key">Admin key</label>
+            <input id="admin-key" name="admin_key" type="password" autocomplete="current-password" required />
+        </div>
+        <div class="card-actions">
+            <button type="submit">Unlock Admin</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

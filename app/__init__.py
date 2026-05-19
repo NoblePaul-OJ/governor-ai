@@ -18,6 +18,12 @@ def create_app():
     initialize_task_db(app)
     initialize_query_log_db(app)
 
+    @app.context_processor
+    def inject_admin_state():
+        from app.services.admin_auth import is_admin_authenticated
+
+        return {"admin_authenticated": is_admin_authenticated()}
+
     app.register_blueprint(main_bp)
     app.register_blueprint(chat_bp)
     app.register_blueprint(admin_bp)

@@ -1,11 +1,12 @@
 import json
+import os
 import sqlite3
 import threading
 import uuid
 from datetime import datetime
 from pathlib import Path
 
-from flask import has_app_context, session
+from flask import g, has_app_context, session
 
 from app.services.memory_extractor import clean_name
 from app.services.task_requests_db import get_query_insights, save_chat_log
@@ -14,24 +15,36 @@ QUERY_LOGS = []
 QUERY_QUERY_COUNTS = {}
 STORE_DATA = {}
 STORE_LOCK = threading.RLock()
-STORE_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "user_sessions.db"
+STORE_DB_PATH = Path(
+    os.getenv("GOVERNOR_STORE_DB_PATH")
+    or Path(__file__).resolve().parents[1] / "data" / "user_sessions.db"
+)
 SESSION_PROFILE_KEY = "_governor_profile_session_id"
-CONVERSATION_STATE = {
-    "topic": None,
-    "intent": None,
-    "entities": {},
-    "history": [],
-    "state_version": 0,
-    "task_flow": {
-        "active_task": None,
-        "current_step": None,
-        "step_index": 0,
-        "collected": {},
-        "completed_task": None,
-        "last_output": None,
-        "state_version": 0,
-    },
-}
+CONVERSATION_STATE_EPOCH = 0
+
+
+def _new_conversation_state(version=None):
+    state_version = CONVERSATION_STATE_EPOCH if version is None else int(version or 0)
+    return {
+        "topic": None,
+        "intent": None,
+        "entities": {},
+        "history": [],
+        "state_version": state_version,
+        "task_flow": {
+            "active_task": None,
+            "current_step": None,
+            "step_index": 0,
+            "collected": {},
+            "completed_task": None,
+            "last_output": None,
+            "state_version": state_version,
+        },
+    }
+
+
+CONVERSATION_STATES = {}
+CONVERSATION_STATE = _new_conversation_state()
 
 _CONFUSION_PHRASES = (
     "i don t understand",
@@ -57,7 +70,39 @@ def _normalize_query(text):
 
 
 def _normalize_session_id(session_id):
-    return str(session_id or "").strip()
+    raw = str(session_id or "").strip()
+    if not raw:
+        return ""
+
+    import re
+
+    cleaned = re.sub(r"[^A-Za-z0-9_.:-]", "", raw)
+    return cleaned[:120]
+
+
+def _resolve_session_id(session_id=None):
+    normalized = _normalize_session_id(session_id)
+    if normalized:
+        return normalized
+
+    if has_app_context():
+        normalized = _normalize_session_id(session.get(SESSION_PROFILE_KEY))
+        if normalized:
+            return normalized
+
+    return "default-session"
+
+
+def bind_session_id(session_id):
+    normalized = _normalize_session_id(session_id)
+    if not normalized:
+        return ""
+
+    if has_app_context():
+        session[SESSION_PROFILE_KEY] = normalized
+        session.modified = True
+
+    return normalized
 
 
 def _is_confused_query(question):
@@ -94,6 +139,33 @@ def _serialize_notes(notes):
     return json.dumps(cleaned, ensure_ascii=False) if cleaned else None
 
 
+def _serialize_preferences(preferences):
+    if not isinstance(preferences, dict):
+        return None
+    cleaned = {
+        str(key).strip(): str(value).strip()
+        for key, value in preferences.items()
+        if str(key).strip() and str(value).strip()
+    }
+    return json.dumps(cleaned, ensure_ascii=False) if cleaned else None
+
+
+def _deserialize_preferences(preferences_json):
+    if not preferences_json:
+        return {}
+    try:
+        preferences = json.loads(preferences_json)
+    except json.JSONDecodeError:
+        preferences = {}
+    if not isinstance(preferences, dict):
+        return {}
+    return {
+        str(key).strip(): str(value).strip()
+        for key, value in preferences.items()
+        if str(key).strip() and str(value).strip()
+    }
+
+
 def _deserialize_profile(profile_json):
     try:
         profile = json.loads(profile_json or "{}")
@@ -123,6 +195,7 @@ def _profile_to_columns(profile):
         value = str(profile.get(key) or "").strip()
         columns[key] = value or None
     columns["notes_json"] = _serialize_notes(profile.get("notes"))
+    columns["preferences_json"] = _serialize_preferences(profile.get("preferences"))
     return columns
 
 
@@ -145,6 +218,10 @@ def _user_row_to_profile(row):
     notes = _deserialize_notes(row["notes_json"])
     if notes:
         profile["notes"] = notes
+    if "preferences_json" in row.keys():
+        preferences = _deserialize_preferences(row["preferences_json"])
+        if preferences:
+            profile["preferences"] = preferences
 
     return profile
 
@@ -178,6 +255,10 @@ def _user_row_to_record(row):
     notes = _deserialize_notes(row["notes_json"])
     if notes:
         record["notes"] = notes
+    if "preferences_json" in row.keys():
+        preferences = _deserialize_preferences(row["preferences_json"])
+        if preferences:
+            record["preferences"] = preferences
 
     return record
 
@@ -195,10 +276,11 @@ def _ensure_user_exists(conn, session_id):
             name_confirmed,
             name_source,
             notes_json,
+            preferences_json,
             created_at,
             updated_at
         )
-        VALUES (?, NULL, NULL, NULL, NULL, 0, NULL, NULL, ?, ?)
+        VALUES (?, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, ?, ?)
         """,
         (session_id, now, now),
     )
@@ -227,10 +309,11 @@ def _upsert_user_profile(conn, session_id, profile, pending_field=None):
             name_confirmed,
             name_source,
             notes_json,
+            preferences_json,
             created_at,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(session_id) DO UPDATE SET
             name = excluded.name,
             department = excluded.department,
@@ -239,6 +322,7 @@ def _upsert_user_profile(conn, session_id, profile, pending_field=None):
             name_confirmed = excluded.name_confirmed,
             name_source = excluded.name_source,
             notes_json = excluded.notes_json,
+            preferences_json = excluded.preferences_json,
             updated_at = excluded.updated_at
         """,
         (
@@ -250,6 +334,7 @@ def _upsert_user_profile(conn, session_id, profile, pending_field=None):
             int(profile.get("name_confirmed") or 0),
             str(profile.get("name_source") or "").strip() or None,
             columns["notes_json"],
+            columns["preferences_json"],
             created_at,
             updated_at,
         ),
@@ -306,6 +391,7 @@ def _ensure_store_db():
                 name_confirmed INTEGER NOT NULL DEFAULT 0,
                 name_source TEXT,
                 notes_json TEXT,
+                preferences_json TEXT,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -316,6 +402,7 @@ def _ensure_store_db():
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 session_id TEXT NOT NULL,
+                conversation_id TEXT,
                 role TEXT NOT NULL,
                 message TEXT NOT NULL,
                 timestamp TEXT NOT NULL
@@ -324,8 +411,13 @@ def _ensure_store_db():
         )
         conn.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_messages_session_id_id
-            ON messages(session_id, id)
+            CREATE TABLE IF NOT EXISTS conversations (
+                conversation_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_updated TEXT NOT NULL
+            )
             """
         )
         existing_columns = {row["name"] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
@@ -333,6 +425,29 @@ def _ensure_store_db():
             conn.execute("ALTER TABLE users ADD COLUMN name_confirmed INTEGER NOT NULL DEFAULT 0")
         if "name_source" not in existing_columns:
             conn.execute("ALTER TABLE users ADD COLUMN name_source TEXT")
+        if "preferences_json" not in existing_columns:
+            conn.execute("ALTER TABLE users ADD COLUMN preferences_json TEXT")
+        message_columns = {row["name"] for row in conn.execute("PRAGMA table_info(messages)").fetchall()}
+        if "conversation_id" not in message_columns:
+            conn.execute("ALTER TABLE messages ADD COLUMN conversation_id TEXT")
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_messages_session_id_id
+            ON messages(session_id, id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_messages_conversation_id_id
+            ON messages(conversation_id, id)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_conversations_session_updated
+            ON conversations(session_id, last_updated DESC)
+            """
+        )
         _migrate_legacy_tables(conn)
         conn.commit()
 
@@ -354,6 +469,7 @@ def add_log(
     workflow_type=None,
     is_fallback=False,
     is_timeout=False,
+    session_id=None,
 ):
     if not QUERY_LOGS and QUERY_QUERY_COUNTS:
         QUERY_QUERY_COUNTS.clear()
@@ -361,9 +477,11 @@ def add_log(
     normalized = _normalize_query(question)
     repeated = bool(normalized and QUERY_QUERY_COUNTS.get(normalized, 0) > 0)
     confused = _is_confused_query(question)
+    resolved_session_id = _resolve_session_id(session_id)
 
     entry = {
         "id": len(QUERY_LOGS) + 1,
+        "session_id": resolved_session_id,
         "question": question,
         "intent": intent,
         "response": response,
@@ -384,6 +502,7 @@ def add_log(
         save_chat_log(
             user_query=question,
             bot_response=response,
+            session_id=resolved_session_id,
             detected_intent=intent,
             workflow_type=workflow_type,
             status=status,
@@ -398,8 +517,18 @@ def add_log(
     return entry
 
 
-def get_conversation_state():
-    return CONVERSATION_STATE
+def get_conversation_state(session_id=None):
+    global CONVERSATION_STATE
+
+    resolved_session_id = _resolve_session_id(session_id)
+    with STORE_LOCK:
+        state = CONVERSATION_STATES.get(resolved_session_id)
+        if state is None:
+            state = _new_conversation_state()
+            CONVERSATION_STATES[resolved_session_id] = state
+        if resolved_session_id == "default-session":
+            CONVERSATION_STATE = state
+        return state
 
 
 def get_session_id():
@@ -407,9 +536,8 @@ def get_session_id():
         session_id = session.get(SESSION_PROFILE_KEY)
         if not session_id:
             session_id = uuid.uuid4().hex
-            session[SESSION_PROFILE_KEY] = session_id
-            session.modified = True
-        return session_id
+            bind_session_id(session_id)
+        return _normalize_session_id(session_id)
 
     return "default-session"
 
@@ -438,7 +566,7 @@ def get_user(session_id):
             conn.commit()
             row = conn.execute(
                 """
-                SELECT id, session_id, name, department, level, pending_field, name_confirmed, name_source, notes_json, created_at, updated_at
+                SELECT id, session_id, name, department, level, pending_field, name_confirmed, name_source, notes_json, preferences_json, created_at, updated_at
                 FROM users
                 WHERE session_id = ?
                 """,
@@ -454,7 +582,7 @@ def load_store():
         with _connect_store() as conn:
             rows = conn.execute(
                 """
-                SELECT id, session_id, name, department, level, pending_field, name_confirmed, name_source, notes_json, created_at, updated_at
+                SELECT id, session_id, name, department, level, pending_field, name_confirmed, name_source, notes_json, preferences_json, created_at, updated_at
                 FROM users
                 """
             ).fetchall()
@@ -498,6 +626,9 @@ def _profile_only(user_record):
     notes = _normalize_notes(user_record.get("notes"))
     if notes:
         profile["notes"] = notes
+    preferences = user_record.get("preferences")
+    if isinstance(preferences, dict) and preferences:
+        profile["preferences"] = preferences
     return profile
 
 
@@ -535,6 +666,8 @@ def set_user_profile(session_id, profile):
 
     if "notes" in normalized:
         merged["notes"] = _normalize_notes(normalized.get("notes"))
+    if "preferences" in normalized and isinstance(normalized.get("preferences"), dict):
+        merged["preferences"] = normalized.get("preferences")
 
     pending_field = current.get("pending_field")
     with STORE_LOCK:
@@ -555,6 +688,7 @@ def clear_user_profile(session_id):
         with _connect_store() as conn:
             conn.execute("DELETE FROM users WHERE session_id = ?", (session_id,))
             conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM conversations WHERE session_id = ?", (session_id,))
             conn.commit()
         load_store()
     return {}
@@ -589,6 +723,8 @@ def update_user(session_id, field, value):
         text = str(value or "").strip()
         if text:
             current[field] = text
+        else:
+            current[field] = None
     elif field == "pending_field":
         current["pending_field"] = str(value or "").strip() or None
     elif field == "name_confirmed":
@@ -635,6 +771,12 @@ def update_user_memory(session_id, data):
             profile["notes"] = notes
             continue
 
+        if key == "preferences" and isinstance(value, dict):
+            preferences = profile.get("preferences") if isinstance(profile.get("preferences"), dict) else {}
+            preferences.update({str(k).strip(): str(v).strip() for k, v in value.items() if str(k).strip() and str(v).strip()})
+            profile["preferences"] = preferences
+            continue
+
         text = str(value or "").strip()
         if text:
             profile[key] = text
@@ -663,8 +805,15 @@ def get_user_value(session_id, key):
     return user.get(key)
 
 
-def save_message(session_id, role, message):
+def _active_conversation_id():
+    if has_app_context():
+        return str(getattr(g, "governor_conversation_id", "") or "").strip() or None
+    return None
+
+
+def save_message(session_id, role, message, conversation_id=None):
     session_id = _normalize_session_id(session_id)
+    conversation_id = str(conversation_id or "").strip() or _active_conversation_id()
     role = str(role or "").strip().lower()
     content = str(message or "").strip()
     if not session_id or role not in {"user", "assistant"} or not content:
@@ -676,18 +825,19 @@ def save_message(session_id, role, message):
             _ensure_user_exists(conn, session_id)
             conn.execute(
                 """
-                INSERT INTO messages (session_id, role, message, timestamp)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO messages (session_id, conversation_id, role, message, timestamp)
+                VALUES (?, ?, ?, ?, ?)
                 """,
-                (session_id, role, content, timestamp),
+                (session_id, conversation_id, role, content, timestamp),
             )
             conn.commit()
 
-    return {"session_id": session_id, "role": role, "message": content}
+    return {"session_id": session_id, "conversation_id": conversation_id, "role": role, "message": content}
 
 
-def get_recent_messages(session_id, limit=5):
+def get_recent_messages(session_id, limit=5, conversation_id=None):
     session_id = _normalize_session_id(session_id)
+    conversation_id = str(conversation_id or "").strip() or _active_conversation_id()
     if not session_id:
         return []
 
@@ -699,22 +849,35 @@ def get_recent_messages(session_id, limit=5):
 
     with STORE_LOCK:
         with _connect_store() as conn:
-            rows = conn.execute(
-                """
-                SELECT role, message, timestamp
-                FROM messages
-                WHERE session_id = ?
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (session_id, limit),
-            ).fetchall()
+            if conversation_id:
+                rows = conn.execute(
+                    """
+                    SELECT role, message, timestamp, conversation_id
+                    FROM messages
+                    WHERE session_id = ? AND conversation_id = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (session_id, conversation_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT role, message, timestamp, conversation_id
+                    FROM messages
+                    WHERE session_id = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (session_id, limit),
+                ).fetchall()
 
     return [
         {
             "role": row["role"],
             "content": row["message"],
             "created_at": row["timestamp"],
+            "conversation_id": row["conversation_id"],
         }
         for row in reversed(rows)
     ]
@@ -772,23 +935,26 @@ def clear_pending_field(session_id):
     return None
 
 
-def reset_conversation_state():
-    CONVERSATION_STATE["state_version"] = CONVERSATION_STATE.get("state_version", 0) + 1
-    CONVERSATION_STATE["topic"] = None
-    CONVERSATION_STATE["intent"] = None
-    CONVERSATION_STATE["entities"] = {}
-    CONVERSATION_STATE["history"] = []
-    CONVERSATION_STATE["task_flow"] = {
-        "active_task": None,
-        "current_step": None,
-        "step_index": 0,
-        "collected": {},
-        "completed_task": None,
-        "last_output": None,
-        "state_version": CONVERSATION_STATE["state_version"],
-    }
+def reset_conversation_state(session_id=None):
+    global CONVERSATION_STATE, CONVERSATION_STATE_EPOCH
+
+    with STORE_LOCK:
+        CONVERSATION_STATE_EPOCH += 1
+        next_version = CONVERSATION_STATE_EPOCH
+        if session_id is None:
+            CONVERSATION_STATES.clear()
+            CONVERSATION_STATE = _new_conversation_state(next_version)
+            CONVERSATION_STATES["default-session"] = CONVERSATION_STATE
+            state = CONVERSATION_STATE
+        else:
+            resolved_session_id = _resolve_session_id(session_id)
+            state = _new_conversation_state(next_version)
+            CONVERSATION_STATES[resolved_session_id] = state
+            if resolved_session_id == "default-session":
+                CONVERSATION_STATE = state
+
     QUERY_QUERY_COUNTS.clear()
-    return CONVERSATION_STATE
+    return state
 
 
 def _history_item(message, role="user"):
@@ -805,32 +971,41 @@ def _history_item(message, role="user"):
     return {"role": role, "content": text}
 
 
-def update_conversation_state(message=None, intent=None, topic=None, entities=None, history_limit=5, role="user"):
+def update_conversation_state(
+    message=None,
+    intent=None,
+    topic=None,
+    entities=None,
+    history_limit=5,
+    role="user",
+    session_id=None,
+):
+    state = get_conversation_state(session_id)
     if message:
         item = _history_item(message, role=role)
         if item is not None:
-            CONVERSATION_STATE["history"].append(item)
-        if len(CONVERSATION_STATE["history"]) > history_limit:
-            CONVERSATION_STATE["history"] = CONVERSATION_STATE["history"][-history_limit:]
+            state["history"].append(item)
+        if len(state["history"]) > history_limit:
+            state["history"] = state["history"][-history_limit:]
 
     if intent is not None:
-        CONVERSATION_STATE["intent"] = intent
+        state["intent"] = intent
 
     if topic is not None:
-        CONVERSATION_STATE["topic"] = topic
+        state["topic"] = topic
 
     if entities is not None:
-        CONVERSATION_STATE["entities"] = entities
+        state["entities"] = entities
 
-    return CONVERSATION_STATE
-
-
-def set_last_intent(intent):
-    update_conversation_state(intent=intent)
+    return state
 
 
-def get_last_intent():
-    return CONVERSATION_STATE.get("intent")
+def set_last_intent(intent, session_id=None):
+    update_conversation_state(intent=intent, session_id=session_id)
+
+
+def get_last_intent(session_id=None):
+    return get_conversation_state(session_id).get("intent")
 
 
 def get_stats():

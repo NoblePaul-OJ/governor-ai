@@ -3,43 +3,89 @@
 {% block title %}Chat Interface{% endblock %}
 
 {% block content %}
-<section class="hero">
-    <h2 id="hero-type"></h2>
-</section>
+<div id="app-splash" class="splash-overlay" role="status" aria-live="polite" aria-label="Governor AI is loading">
+    <div class="splash-grid" aria-hidden="true"></div>
+    <div class="splash-corner splash-corner-tl" aria-hidden="true"></div>
+    <div class="splash-corner splash-corner-tr" aria-hidden="true"></div>
+    <div class="splash-corner splash-corner-bl" aria-hidden="true"></div>
+    <div class="splash-corner splash-corner-br" aria-hidden="true"></div>
 
-<section class="panel chat-panel">
-    <div class="chat-header">
-        <div>
-            <p class="eyebrow">Governor AI</p>
-            <h2>Student Support Assistant</h2>
-            <p class="meta">Ask about fees, registration, results, hostel allocation, admissions, schedules, or anything else you need help with.</p>
+    <div class="splash-content">
+        <div class="splash-badge">AI-Powered University Assistant</div>
+        <div class="splash-logo-wrap">
+            <div class="splash-logo" aria-hidden="true">
+                <svg viewBox="0 0 30 30" focusable="false">
+                    <circle cx="15" cy="9" r="4.5" stroke="currentColor" stroke-width="1.6" fill="none" />
+                    <path d="M7 24c0-4.418 3.582-8 8-8s8 3.582 8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none" />
+                    <path d="M21 6l3-2M21 12l3 2M9 6L6 4M9 12L6 14" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.55" />
+                    <circle cx="24" cy="4" r="1.5" fill="currentColor" opacity="0.62" />
+                    <circle cx="24" cy="14" r="1.5" fill="currentColor" opacity="0.62" />
+                    <circle cx="6" cy="4" r="1.5" fill="currentColor" opacity="0.62" />
+                    <circle cx="6" cy="14" r="1.5" fill="currentColor" opacity="0.62" />
+                </svg>
+            </div>
+            <h1>Governor <span>AI</span></h1>
         </div>
-        <div class="status-pill">Online</div>
-    </div>
-
-    <div id="chat-window" class="chat-window">
-        <div id="empty-state" class="empty-state">
-            <p>Ask me anything about:</p>
-            <ul>
-                <li>Course Registration</li>
-                <li>Hostel Accommodation</li>
-                <li>School Fees</li>
-                <li>Admissions</li>
-            </ul>
-            <div class="quick-actions">
-                <button type="button" data-quick="How do I register courses?">Register Courses</button>
-                <button type="button" data-quick="Hostel application process">Hostel</button>
-                <button type="button" data-quick="School fees payment">Fees</button>
+        <p class="splash-subtitle">Your Intelligent GOUNI Assistant</p>
+        <div class="splash-loader" aria-hidden="true">
+            <div class="splash-loader-track">
+                <div class="splash-loader-fill"></div>
+            </div>
+            <div class="splash-dots">
+                <span></span>
+                <span></span>
+                <span></span>
             </div>
         </div>
+        <p id="splash-loading-text" class="splash-loading-text">Initialising</p>
     </div>
+</div>
 
-    <div id="typing-indicator" class="typing-indicator hidden">Governor is typing...</div>
+<button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Toggle conversation history" aria-expanded="true">
+    <span aria-hidden="true">&#9776;</span>
+    <span class="sidebar-toggle-label">History</span>
+</button>
+<div id="sidebar-overlay" class="sidebar-overlay" aria-hidden="true"></div>
 
-    <form id="chat-form" class="input-area">
-        <input id="chat-input" type="text" placeholder="Ask about registration, hostel, fees, or any student issue..." required />
-        <button type="submit">Send</button>
-    </form>
+<section id="chat-shell" class="chat-shell" aria-label="Governor AI chat workspace">
+    <aside id="chat-sidebar" class="chat-sidebar" aria-label="Conversation history">
+        <div class="sidebar-top">
+            <div class="sidebar-heading-row">
+                <div>
+                    <p class="eyebrow">Governor AI</p>
+                    <h2>Chats</h2>
+                </div>
+                <button id="sidebar-close" class="sidebar-close" type="button" aria-label="Close conversation history">&times;</button>
+            </div>
+            <button id="new-chat-button" class="new-chat-button" type="button">New Chat</button>
+        </div>
+        <div id="conversation-list" class="conversation-list"></div>
+    </aside>
+
+    <section class="panel chat-panel">
+        <div class="chat-header">
+            <div>
+                <p class="eyebrow">Governor AI</p>
+                <h2 id="active-conversation-title">University Assistant</h2>
+                <p class="meta">Ask naturally about registration, fees, hostel, admissions, records, or campus support.</p>
+            </div>
+            <div class="status-pill">Online</div>
+        </div>
+
+        <div id="chat-window" class="chat-window">
+            <div id="empty-state" class="empty-state">
+                <p>Start with whatever you need help with.</p>
+                <span>Governor AI will guide you from there.</span>
+            </div>
+        </div>
+
+        <div id="typing-indicator" class="typing-indicator hidden">Governor is typing...</div>
+
+        <form id="chat-form" class="input-area">
+            <input id="chat-input" type="text" placeholder="Tell Governor AI what you need help with..." required />
+            <button type="submit">Send</button>
+        </form>
+    </section>
 </section>
 
 <script src="{{ url_for('static', filename='js/hero-typewriter.js') }}"></script>

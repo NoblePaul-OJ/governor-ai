@@ -24,6 +24,10 @@
                 <div class="label">Task Requests</div>
                 <div class="value">{{ task_requests|length }}</div>
             </div>
+            <div class="summary-card">
+                <div class="label">Feedback Signals</div>
+                <div class="value">{{ feedback_summary.total if feedback_summary else 0 }}</div>
+            </div>
         </div>
     </div>
 
@@ -39,6 +43,64 @@
 </section>
 
 <div class="admin-grid">
+    <section class="panel admin-section">
+        <h3>User Feedback & Signals</h3>
+        <p class="section-note">Early analytics for satisfaction, repeated complaints, unresolved issues, and commonly searched support areas.</p>
+
+        {% if feedback_summary %}
+        <div class="admin-summary">
+            <div class="summary-card">
+                <div class="label">Helpful</div>
+                <div class="value">{{ feedback_summary.counts.helpful }}</div>
+            </div>
+            <div class="summary-card">
+                <div class="label">Not Helpful</div>
+                <div class="value">{{ feedback_summary.counts.not_helpful }}</div>
+            </div>
+            <div class="summary-card">
+                <div class="label">Inaccurate</div>
+                <div class="value">{{ feedback_summary.counts.inaccurate }}</div>
+            </div>
+        </div>
+
+        {% if feedback_summary.repeated_issue_topics %}
+        <div class="request-list">
+            {% for item in feedback_summary.repeated_issue_topics %}
+            <article class="request-card">
+                <div class="request-meta">
+                    <span>Topic: {{ item.topic }}</span>
+                    <span>Signals: {{ item.count }}</span>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if feedback_summary.recent_issues %}
+        <h3>Recent Issues</h3>
+        <div class="request-list">
+            {% for item in feedback_summary.recent_issues %}
+            <article class="request-card">
+                <div class="request-meta">
+                    <span>{{ item.feedback }}</span>
+                    <span>{{ item.intent or item.category or 'Unknown topic' }}</span>
+                    <span>{{ item.timestamp or 'Unknown time' }}</span>
+                </div>
+                <p><strong>User:</strong> {{ item.message or 'No message captured' }}</p>
+                {% if item.comment %}
+                <p><strong>Comment:</strong> {{ item.comment }}</p>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% else %}
+        <div class="empty-state">
+            <p>No feedback signals captured yet.</p>
+        </div>
+        {% endif %}
+    </section>
+
     <section class="panel admin-section">
         <h3>Knowledge Base Manager</h3>
         <p class="section-note">Add, edit, or remove entries in <code>knowledgeBase.json</code>.</p>
@@ -172,6 +234,20 @@
                 </div>
             </div>
         </div>
+    </section>
+
+    <section class="panel admin-section">
+        <h3>Institutional Knowledge Manager</h3>
+        <p class="section-note">Admin-only structured data for staff information, governance records, announcements, faculties, and institutional facts.</p>
+        <form method="post" class="admin-form">
+            <div class="field-group">
+                <label for="institutional-json">Institutional Knowledge JSON</label>
+                <textarea id="institutional-json" name="institutional_json" rows="16">{{ institutional_knowledge | tojson(indent=2) }}</textarea>
+            </div>
+            <div class="card-actions">
+                <button type="submit" name="action" value="institutional_update">Save Institutional Knowledge</button>
+            </div>
+        </form>
     </section>
 
     <section class="panel admin-section">

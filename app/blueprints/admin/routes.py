@@ -1,20 +1,74 @@
+import json
+
 from flask import current_app, flash, jsonify, redirect, render_template, request, url_for
 
 from app.services.admin_store import (
     add_knowledge_entry,
     delete_knowledge_entry,
     load_directory_data,
+    load_feedback_entries,
+    load_institutional_knowledge_data,
     load_knowledge_base_entries,
     load_task_requests,
+    save_institutional_knowledge_data,
+    summarize_feedback,
     update_directory_fields,
     update_knowledge_entry,
     update_task_request_status,
+)
+from app.services.admin_auth import (
+    authenticate_admin_key,
+    clear_admin_session,
+    get_admin_secret,
+    require_admin_access,
 )
 from app.services.rule_engine import get_rules, update_rules
 from app.services.store import QUERY_LOGS, get_stats, get_system_insights
 from app.services.task_requests_db import list_chat_logs
 
 from . import admin_bp
+
+
+def _safe_admin_next():
+    next_url = str(request.args.get("next") or "").strip()
+    admin_prefix = str(admin_bp.url_prefix or "/admin").rstrip("/")
+    if next_url.startswith(admin_prefix) and not next_url.startswith("//"):
+        return next_url
+    return url_for("admin.dashboard")
+
+
+@admin_bp.before_request
+def protect_admin_routes():
+    if request.endpoint in {"admin.login", "admin.logout"}:
+        return None
+    return require_admin_access()
+
+
+@admin_bp.route("/login", methods=["GET", "POST"])
+def login():
+    configured = bool(get_admin_secret())
+    if request.method == "POST":
+        if not configured:
+            flash("Admin access is not configured. Set ADMIN_ACCESS_KEY in the environment.", "error")
+        elif authenticate_admin_key(request.form.get("admin_key") or request.form.get("password")):
+            flash("Admin access granted.", "success")
+            return redirect(_safe_admin_next())
+        else:
+            flash("Invalid admin key.", "error")
+
+    token = request.args.get("admin_key")
+    if request.method == "GET" and token and authenticate_admin_key(token):
+        flash("Admin access granted.", "success")
+        return redirect(_safe_admin_next())
+
+    return render_template("admin/login.html", configured=configured)
+
+
+@admin_bp.get("/logout")
+def logout():
+    clear_admin_session()
+    flash("Admin access ended.", "success")
+    return redirect(url_for("admin.login"))
 
 
 @admin_bp.route("/", methods=["GET", "POST"])
@@ -47,6 +101,10 @@ def dashboard():
                 }
                 update_directory_fields(section, fields, subkey=subkey)
                 flash("Directory entry updated.", "success")
+            elif action == "institutional_update":
+                payload = json.loads(request.form.get("institutional_json", "{}"))
+                save_institutional_knowledge_data(payload)
+                flash("Institutional knowledge updated.", "success")
             elif action == "request_resolved":
                 request_id = request.form.get("request_id", "")
                 if update_task_request_status(request_id, "resolved"):
@@ -55,7 +113,7 @@ def dashboard():
                     flash("Could not update that task request.", "error")
             else:
                 flash("Unknown admin action.", "error")
-        except (ValueError, IndexError, KeyError):
+        except (ValueError, IndexError, KeyError, json.JSONDecodeError):
             flash("That change could not be saved. Please check the fields and try again.", "error")
 
         return redirect(url_for("admin.dashboard"))
@@ -72,8 +130,11 @@ def dashboard():
         keyword_stats=keyword_stats,
         insights=insights,
         kb_entries=load_knowledge_base_entries(),
+        institutional_knowledge=load_institutional_knowledge_data(),
         directory_data=load_directory_data(),
         task_requests=load_task_requests(limit=300),
+        feedback_summary=summarize_feedback(limit=250),
+        feedback_entries=load_feedback_entries(limit=50),
     )
 
 

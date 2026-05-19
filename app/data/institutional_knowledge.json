@@ -1,0 +1,456 @@
+{
+  "university_profile": {
+    "name": "Godfrey Okoye University",
+    "short_names": ["GOUNI", "GO University"],
+    "motto": "Unity of Knowledge",
+    "type": "Private Catholic University",
+    "established": "3 November 2009",
+    "ownership": "Catholic Diocese of Enugu",
+    "distinction": "First university owned by a Catholic Diocese in Africa",
+    "student_population": "Over 7,000 students",
+    "website": "https://www.gouni.edu.ng",
+    "campuses": ["Thinkers Corner Campus", "Ugwuomu-Nike Campus"],
+    "founding_note": "Godfrey Okoye University was founded by the Catholic Diocese of Enugu under the leadership of Rev. Prof. Dr. Christian Anieke, and became operational after receiving its NUC licence in 2009. The university's name honors Bishop Godfrey Mary Paul Okoye's legacy of Catholic education and institutional service."
+  },
+  "faculties": [
+    "Faculty of Arts",
+    "Faculty of Education",
+    "Faculty of Management and Social Sciences",
+    "Faculty of Natural Sciences and Environmental Studies",
+    "Faculty of Law",
+    "Faculty of Computing and Information Technology (FACIT)",
+    "Faculty of Basic Medical Sciences",
+    "Faculty of Basic Clinical Sciences",
+    "College of Medicine",
+    "School of Postgraduate Studies"
+  ],
+  "external_leadership": {
+    "president_of_nigeria": {
+      "name": "His Excellency Bola Ahmed Tinubu, GCFR",
+      "title": "President of Nigeria"
+    },
+    "pope": {
+      "name": "His Holiness Pope Leo XIV",
+      "title": "Pope"
+    },
+    "governor_of_enugu_state": {
+      "name": "His Excellency Barr. (Dr.) Peter Ndubuisi Mbah",
+      "title": "Governor of Enugu State"
+    },
+    "minister_of_education": {
+      "name": "Dr. Morufu Olatunji Alausa",
+      "title": "Minister of Education"
+    },
+    "executive_secretary_nuc": {
+      "name": "Prof. Abdullahi Yusufu Ribadu",
+      "title": "Executive Secretary, National Universities Commission (NUC)"
+    }
+  },
+  "departments": {
+    "Faculty of Management and Social Sciences": [
+      "Accounting",
+      "Banking & Finance",
+      "Economics",
+      "Management",
+      "Marketing",
+      "Political Science",
+      "Public Administration",
+      "International Relations",
+      "Sociology",
+      "Psychology",
+      "Mass Communication"
+    ],
+    "Faculty of Natural and Applied Sciences": [
+      "Mathematics",
+      "Physics",
+      "Physics with Electronics",
+      "Industrial Physics",
+      "Biochemistry",
+      "Biotechnology",
+      "Microbiology",
+      "Chemistry",
+      "Industrial Chemistry",
+      "Architecture",
+      "Industrial Design",
+      "Applied Biology"
+    ],
+    "Faculty of Computing and Information Technology (FACIT)": [
+      "Computer Science"
+    ],
+    "Faculty of Education": [
+      "Computer Science Education",
+      "Mathematics Education",
+      "Physics Education",
+      "Chemistry Education",
+      "Biology Education",
+      "Business Education",
+      "Economics Education",
+      "Political Science Education",
+      "English Education",
+      "Social Studies Education"
+    ],
+    "Faculty of Arts": [
+      "English & Literary Studies",
+      "Philosophy",
+      "Music",
+      "History & International Studies"
+    ],
+    "Faculty of Law": ["Law"],
+    "College of Medicine": ["Medicine & Surgery", "Nursing Sciences"]
+  },
+  "admissions": {
+    "status_note": "Admissions are open for undergraduate programmes, postgraduate programmes, JUPEB, and sandwich programmes based on the latest information available to me.",
+    "application_portal": "https://gouni.edu.ng/fill-admission-form/",
+    "admissions_portal": "https://admission.gouni.edu.ng",
+    "general_requirement": "Minimum of 5 O'Level credits including English and Mathematics.",
+    "application_fee_note": "The last time I checked, admission application into GOUNI was free and should be done only through official university channels.",
+    "routes": ["UTME", "Direct Entry", "JUPEB", "Postgraduate applications"],
+    "cut_off_marks": {
+      "Medicine & Surgery": 200,
+      "Law": 200,
+      "Nursing": 180,
+      "Architecture": 160,
+      "Computer Science": 160,
+      "Education": 130,
+      "Most other programmes": 150
+    },
+    "screening_note": "Law and Medicine applicants may undergo screening before payment."
+  },
+  "contacts": {
+    "general": {
+      "email": "info@gouni.edu.ng",
+      "phones": ["09134273215", "07061756730", "09121767243", "09121963049"],
+      "fees_enquiries": "08067160418",
+      "address": "Thinkers Corner, Enugu State, Nigeria"
+    },
+    "ict": {
+      "office": "ICT Support",
+      "phones": ["09134273215"],
+      "emails": ["ict@gouni.edu.ng"],
+      "location": "ICT Centre, Main Campus",
+      "hours": "8am - 4pm",
+      "handles": ["portal login issues", "registration issues", "payment reflection", "result checking", "portal errors"]
+    },
+    "bursary": {
+      "office": "Bursary Unit",
+      "phones": ["08067160418", "08068084455", "08068820118"],
+      "emails": ["info@gouni.edu.ng"],
+      "location": "Bursary Unit, Main Campus",
+      "handles": ["school fees", "payment complaints", "receipt issues", "clearance/payment verification", "financial inquiries"]
+    },
+    "admissions": {
+      "office": "Admissions Office",
+      "phones": ["09134273215", "07061756730", "07065118357"],
+      "emails": ["admissions@gouni.edu.ng", "info@gouni.edu.ng", "chinedu@gouni.edu.ng"],
+      "location": "Admissions Office, Main Campus",
+      "handles": ["admission inquiries", "application issues", "transfer inquiries", "admission status", "acceptance guidance"]
+    }
+  },
+  "fees": {
+    "sessional": true,
+    "accommodation_included_note": "Accommodation is included in many tuition structures.",
+    "installment_rule": "Students can pay 60% in the first semester and complete the remaining 40% within three months.",
+    "payment_rule": "All payments must go through the official ERP/payment channels. Payments to personal accounts are not recognized.",
+    "erp_portal": "https://student.erp.gouni.edu.ng",
+    "fees_pdf": "https://gouni.edu.ng/new/wp-content/uploads/2025/07/GOUNI-FEES-STRUCTURE-2025.2026-1.pdf"
+  },
+  "principal_officers": {
+    "vice_chancellor": {
+      "name": "Rev. Fr. Prof. Dr. Christian Anieke",
+      "confidence": "verified_current",
+      "notes": ["Verified current Vice-Chancellor", "Founder of the university", "Professor of English", "Director of GO Uni Group of Institutions", "Director of GO Uni Radio 106.9 FM", "Director of the Institute of Chinua Achebe Studies"]
+    },
+    "deputy_vice_chancellor_administration": {
+      "name": "Prof. Dr. Sergius N. Udeh",
+      "confidence": "verified_current"
+    },
+    "deputy_vice_chancellor_academic": {
+      "name": "Rev. Sr. Prof. Dr. Mary Sylvia Nwachukwu, DDL",
+      "confidence": "verified_current"
+    },
+    "registrar": {
+      "name": "Dr. Peace Chidi Ike",
+      "confidence": "verified_current"
+    },
+    "bursar": {
+      "name": "Prof. Dr. Modesta A. Egiyi",
+      "confidence": "verified_current"
+    },
+    "librarian": {
+      "name": "Dr. Juliana Iwu-James (Assoc. Prof.)",
+      "confidence": "verified_current",
+      "title": "University Librarian"
+    }
+  },
+  "governance": {
+    "proprietor": {
+      "name": "His Excellency Most Rev. Dr. Callistus Onaga",
+      "title": "Catholic Bishop of Enugu Diocese"
+    },
+    "chancellor": {
+      "name": "His Grace Most Rev. Dr. Ignatius Ayau Kaigama",
+      "title": "Catholic Archbishop of Abuja"
+    },
+    "chairman_bot": {
+      "name": "Emeritus Prof. Dr. Bartho Okolo, OFR, FNS, FASI",
+      "title": "Chairman, Board of Trustees"
+    },
+    "pro_chancellor": {
+      "name": "Prof. Dr. Christian Nwachukwu Okeke (CoH)",
+      "title": "Pro-Chancellor & Chairman, Governing Council"
+    }
+  },
+  "board_of_trustees": [
+    {
+      "name": "Emeritus Prof. Dr. Bartho N. Okolo",
+      "role": "Chairman"
+    },
+    {
+      "name": "Prof. Dr. Ikechukwu Joseph Chidobem",
+      "role": "Member"
+    },
+    {
+      "name": "Prof. Dr. Barth Nnaji, CON, NNOM",
+      "role": "Member"
+    },
+    {
+      "name": "Very Rev. Monsignor Prof. Dr. Obiora Ike",
+      "role": "Member"
+    },
+    {
+      "name": "Dr. Mrs. Vero Egonnekwu Mogboh",
+      "role": "Member"
+    },
+    {
+      "name": "Prof. Dr. Christian Nwachukwu Okeke",
+      "role": "Member"
+    },
+    {
+      "name": "Rev. Fr. Prof. Dr. Christian Anieke",
+      "role": "Member"
+    },
+    {
+      "name": "Dr. Hubert Eze",
+      "role": "Member"
+    },
+    {
+      "name": "Mr. Paul Nwanne Tunde Erinne",
+      "role": "Member"
+    },
+    {
+      "name": "Dr. Peace Chidi Ike",
+      "role": "Registrar & Secretary to the Board"
+    }
+  ],
+  "college_of_medicine": {
+    "provost": "Prof. Dr. Frank Akpuaka",
+    "deputy_provost": "Prof. Dr. Miriam N. Unachukwu",
+    "chief_medical_director": "Prof. Dr. Amechi U. Katchy"
+  },
+  "deans_of_faculties": {
+    "postgraduate_studies": {
+      "name": "Prof. Dr. Sergius N. Udeh",
+      "faculty": "School of Postgraduate Studies"
+    },
+    "basic_medical_sciences": {
+      "name": "Prof. Dr. Iheuko Ogbonnaya",
+      "faculty": "Faculty of Basic Medical Sciences"
+    },
+    "arts_and_education": {
+      "name": "Prof. Dr. Ekene Osuji",
+      "faculty": "Faculty of Arts and Education"
+    },
+    "law": {
+      "name": "Dr. Friday Okechukwu Iloh (Assoc. Prof.)",
+      "faculty": "Faculty of Law",
+      "status": "Acting Dean"
+    },
+    "management_and_social_sciences": {
+      "name": "Dr. John Odo (Assoc. Prof.)",
+      "faculty": "Faculty of Management and Social Sciences",
+      "status": "Acting Dean"
+    },
+    "natural_sciences": {
+      "name": "Prof. Dr. Chidi Uhuegbu",
+      "faculty": "Faculty of Natural Sciences and Environmental Studies"
+    },
+    "computing_and_it": {
+      "name": "Prof. Dr. Ifenyinwa Angela Ajah",
+      "faculty": "Faculty of Computing and Information Technology (FACIT)"
+    },
+    "basic_clinical_sciences": {
+      "name": "Dr. Ifeanyi Victor Ugwu",
+      "faculty": "Faculty of Basic Clinical Sciences"
+    },
+    "student_affairs_main": {
+      "name": "Mr. Friday Okemiri",
+      "faculty": "Dean of Student Affairs (Main Campus)"
+    },
+    "student_affairs_thinkers": {
+      "name": "Rev. Fr. Casimir Nwokolo",
+      "faculty": "Dean of Student Affairs (Thinker's Corner Campuses)"
+    }
+  },
+  "heads_of_departments": {
+    "faculty_arts": {
+      "History & International Studies": "Dr. Edith I. Ezedinachi",
+      "English & Literary Studies": "Dr. Chijioke Edwards",
+      "Music": "Rev. Fr. Dr. Basil Okeke"
+    },
+    "faculty_education": {
+      "Arts Education": "Prof. Dr. Felicia Ene",
+      "Science & Computer Education": "Dr. Veronica Ude"
+    },
+    "faculty_law": {
+      "Public Law": "Prof. Dr. John Nwazi",
+      "International Law & Jurisprudence": "Prof. Dr. Boniface Okere"
+    },
+    "faculty_management_social_sciences": {
+      "Accounting & Finance": "Dr. John Odo",
+      "Business Management": "Prof. Dr. Nicholas Igwe",
+      "Economics": "Dr. Modesta Iduma",
+      "Political Science & International Relations": "Dr. Samuel Ugwuozor",
+      "Sociology/Psychology": "Dr. Chinwe Iyanda",
+      "Mass Communication": "Mr. Nnamdi Nzekwe"
+    },
+    "faculty_natural_sciences": {
+      "Biological Sciences": "Dr. Frances Ngozi Olisaka",
+      "Chemical Sciences": "Dr. Joy Chizoba Anosike",
+      "Architecture": "Dr. Chinechetam Chukwu",
+      "Physical & Geo Sciences": "Dr. Loretta O. Onuorah"
+    },
+    "college_of_medicine": {
+      "Nursing Sciences": "Prof. Dr. Chika Grace Ugochukwu",
+      "Physiology": "Dr. Fintan Ekochin",
+      "Medical Biochemistry": "Dr. Favour Udoeyop",
+      "Anatomy": "Prof. Dr. Amechi U. Katchy",
+      "Chemical Pathology": "Dr. Martin C. Ugonabo",
+      "Medical Microbiology": "Prof. Dr. Marian N. Unachukwu",
+      "Internal Medicine": "Dr. Winifred Adiri",
+      "Surgery": "Dr. David Agharighom Okoh",
+      "Haematology": "Dr. Gladys Ene",
+      "Paediatrics": "Prof. Dr. Christopher Eke",
+      "Obstetrics & Gynecology": "Prof. Dr. Anthony Umeh",
+      "Anatomic Pathology": "Dr. Ifeanyi Ugwu",
+      "Pharmacology": "Prof. Dr. Anthony Mbah",
+      "Community Medicine": "Dr. Linus Onoh"
+    },
+    "facit": {
+      "Computer Science & Mathematics": "Dr. Uchenna Franklin Okebanama",
+      "Cyber Security": "Dr. Kingsley Chibueze",
+      "Software Engineering": "Dr. Callistus Ugorji",
+      "Data Science": "Prof. Dr. Ndidiamaka Ozofo"
+    }
+  },
+  "offices": {
+    "vice_chancellor": {
+      "name": "Rev. Fr. Prof. Dr. Christian Anieke",
+      "confidence": "verified_current",
+      "notes": ["Verified current Vice-Chancellor", "Founder of the university", "Professor of English", "Director of GO Uni Group of Institutions", "Director of GO Uni Radio 106.9 FM", "Director of the Institute of Chinua Achebe Studies"]
+    },
+    "registrar": {
+      "name": "Dr. Peace Chidi Ike",
+      "confidence": "verified_current"
+    },
+    "bursar": {
+      "name": "Prof. Dr. Modesta A. Egiyi",
+      "confidence": "verified_current"
+    }
+  },
+  "historical_pioneer_management": {
+    "summary": "The complete pioneer staff roll is not fully represented in the current structured knowledge base. The latest verified records available here identify the founding and take-off leadership around Rev. Fr. Prof. Dr. Christian Anieke and the Catholic Diocese of Enugu.",
+    "available_officers": [
+      {
+        "name": "Rev. Fr. Prof. Dr. Christian Anieke",
+        "position": "Founder and Vice Chancellor"
+      },
+      {
+        "name": "Catholic Diocese of Enugu",
+        "position": "Proprietor / founding institutional owner"
+      }
+    ],
+    "note": "For a complete archival staff list, the Registrar's Office or university archives would be the proper source."
+  },
+  "directorates": [
+    "ICT Directorate",
+    "Entrepreneurship Directorate",
+    "Sports Directorate",
+    "Ethics Directorate",
+    "Student Mentorship & Parent Relations",
+    "Directorate of Medical Education",
+    "Research & Innovation",
+    "Academic Planning & Quality Assurance",
+    "Spirituality & Inter-Religious Dialogue",
+    "Gender Affairs & Equality",
+    "General Studies",
+    "SIWES",
+    "Health Services",
+    "Linkages & International Collaborations"
+  ],
+  "announcements": [
+    "STEP-S Train-the-Trainer workshops",
+    "Architecture competitions",
+    "Pre-mobilization briefings for NYSC",
+    "Student matriculation ceremonies",
+    "Academic public lectures"
+  ],
+  "rankings": {
+    "summary": "The last time I checked, Godfrey Okoye University was ranked among notable private universities in Nigeria and appeared in recognized Sub-Saharan Africa and Webometrics ranking contexts.",
+    "recognition_areas": ["ethical leadership", "student engagement", "research visibility", "access and fairness", "Africa impact"]
+  },
+  "partnerships": [
+    "Birmingham City University (UK)",
+    "Technical University Cologne (Germany)",
+    "Bowie State University (USA)",
+    "Africa-UniNet",
+    "UNESCO-related initiatives",
+    "ICMPD",
+    "DAAD STEP-S Programme"
+  ],
+  "postgraduate_programmes": {
+    "levels": ["PGD programmes", "Master's programmes", "PhD programmes"],
+    "areas": ["Education", "Computer Science", "Biotechnology", "Physics", "Accounting", "Political Science", "English & Literary Studies", "Economics", "Management", "Law", "Sociology", "Mass Communication", "Mathematics Education", "Measurement & Evaluation"],
+    "requirements": {
+      "PGD": "First degree or HND",
+      "Master's": "Minimum Second Class Lower",
+      "PhD": "Relevant Master's degree"
+    },
+    "portal": "https://pg.gouni.edu.ng"
+  },
+  "facilities": [
+    "GTBank ATM",
+    "UBA ATM",
+    "GO Uni Radio 106.9 FM",
+    "Online learning platforms",
+    "Library services",
+    "Medical facilities"
+  ],
+  "portals": {
+    "student_erp": "https://student.erp.gouni.edu.ng",
+    "admissions": "https://admission.gouni.edu.ng",
+    "postgraduate": "https://pg.gouni.edu.ng",
+    "online_learning": "https://onlinelearning.gouni.edu.ng",
+    "transcript": "https://transcript.gouni.edu.ng",
+    "library_catalogue": "https://gouni.mlasolutions.com"
+  },
+  "accreditation": {
+    "summary": "The last time I checked, all undergraduate programmes were accredited by the National Universities Commission (NUC), and the Faculty of Law had approval from the Council of Legal Education.",
+    "highlighted_programmes": ["Law", "Computer Science", "Biochemistry", "Economics", "Psychology", "Sociology", "Banking & Finance", "Marketing", "Public Administration"]
+  },
+  "scholarships": {
+    "summary": "The university offers scholarship opportunities through initiatives such as the GO Uni Legacy Project. Some scholarships may cover substantial parts of tuition depending on eligibility and sponsorship availability."
+  },
+  "teaching_hospital": {
+    "name": "Godfrey Okoye University Teaching Hospital (GOUNITH)",
+    "location": "Ugwuomu-Nike campus",
+    "college_established": "2022",
+    "supports": ["Medicine & Surgery", "Nursing Sciences", "clinical training", "medical research"]
+  },
+  "exams_records": {
+    "unit": "Exams & Records Unit",
+    "parent_office": "Office of the Registrar",
+    "location": "GOUNI White House",
+    "responsibilities": ["academic records management", "transcript processing", "result verification", "credential verification", "registration record management"],
+    "transcript_portal": "https://transcript.gouni.edu.ng"
+  }
+}
